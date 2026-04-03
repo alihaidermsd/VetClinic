@@ -238,19 +238,19 @@ export function DashboardHome({ stats, onRefresh }: DashboardHomeProps) {
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-3">
-            <Button variant="outline" onClick={() => window.location.href = '#/reception'}>
+            <Button variant="outline" onClick={() => window.location.href = 'reception'}>
               <Users className="w-4 h-4 mr-2" />
               New Patient
             </Button>
-            <Button variant="outline" onClick={() => window.location.href = '#/billing'}>
+            <Button variant="outline" onClick={() => window.location.href = 'billing'}>
               <CreditCard className="w-4 h-4 mr-2" />
               Process Payment
             </Button>
-            <Button variant="outline" onClick={() => window.location.href = '#/inventory'}>
+            <Button variant="outline" onClick={() => window.location.href = 'inventory'}>
               <Package className="w-4 h-4 mr-2" />
               Check Inventory
             </Button>
-            <Button variant="outline" onClick={() => window.location.href = '#/reports'}>
+            <Button variant="outline" onClick={() => window.location.href = 'reports'}>
               <TrendingUp className="w-4 h-4 mr-2" />
               View Reports
             </Button>
