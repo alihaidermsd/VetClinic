@@ -26,10 +26,26 @@ import { toast } from 'sonner';
 
 type ModuleType = 'dashboard' | 'reception' | 'doctor' | 'billing' | 'pharmacy' | 'inventory' | 'reports' | 'admin';
 
+const EMPTY_DASHBOARD_STATS = {
+  today_tokens: 0,
+  today_revenue: 0,
+  pending_tokens: 0,
+  low_stock_items: 0,
+  waiting_patients: 0,
+  recent_bills: [] as any[],
+  room_stats: [] as any[],
+};
+
 export function Dashboard() {
   const { user, signOut, checkPermission } = useAuth();
   const [activeModule, setActiveModule] = useState<ModuleType>('dashboard');
-  const [stats, setStats] = useState<any>(null);
+  const [stats, setStats] = useState<any>(() => {
+    try {
+      return getDashboardStats();
+    } catch {
+      return { ...EMPTY_DASHBOARD_STATS };
+    }
+  });
 
   useEffect(() => {
     loadStats();
@@ -43,6 +59,7 @@ export function Dashboard() {
       setStats(data);
     } catch (error) {
       console.error('Failed to load stats:', error);
+      setStats({ ...EMPTY_DASHBOARD_STATS });
     }
   };
 
@@ -181,22 +198,22 @@ export function Dashboard() {
               </p>
             </div>
             <div className="flex items-center gap-4">
-              {stats && (
-                <div className="flex items-center gap-6 text-sm">
-                  <div className="text-center">
-                    <p className="text-slate-500">Today's Tokens</p>
-                    <p className="font-semibold text-slate-900">{stats.today_tokens}</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-slate-500">Revenue</p>
-                    <p className="font-semibold text-green-600">₹{stats.today_revenue.toLocaleString()}</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-slate-500">Waiting</p>
-                    <p className="font-semibold text-orange-600">{stats.waiting_patients}</p>
-                  </div>
+              <div className="flex items-center gap-6 text-sm">
+                <div className="text-center">
+                  <p className="text-slate-500">Today's Tokens</p>
+                  <p className="font-semibold text-slate-900">{stats?.today_tokens ?? 0}</p>
                 </div>
-              )}
+                <div className="text-center">
+                  <p className="text-slate-500">Revenue</p>
+                  <p className="font-semibold text-green-600">
+                    ₹{Number(stats?.today_revenue ?? 0).toLocaleString()}
+                  </p>
+                </div>
+                <div className="text-center">
+                  <p className="text-slate-500">Waiting</p>
+                  <p className="font-semibold text-orange-600">{stats?.waiting_patients ?? 0}</p>
+                </div>
+              </div>
             </div>
           </div>
         </header>

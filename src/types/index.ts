@@ -185,7 +185,7 @@ export interface MedicalRecord {
   symptoms?: string;
   treatment?: string;
   notes?: string;
-  follow_up_date?: string;
+  follow_up_date?: string | null;
   created_at: string;
 }
 

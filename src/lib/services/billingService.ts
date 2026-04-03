@@ -1,5 +1,22 @@
-import { query, getOne, run } from '../database';
+import { query, getOne, run, listTable } from '../database';
+import { getPatientById, getAnimalById } from './patientService';
+import { deductStock, addStock } from './inventoryService';
 import type { Bill, BillItem, Payment, BillItemFormData, PaymentFormData, ItemType } from '@/types';
+
+function enrichBillForList(b: Bill) {
+  const patient = getPatientById(b.patient_id);
+  const animal = getAnimalById(b.animal_id);
+  return {
+    ...b,
+    owner_name: patient?.owner_name ?? '',
+    owner_phone: patient?.owner_phone ?? '',
+    animal_name: animal?.name ?? '',
+  };
+}
+
+function roundMoney(n: number): number {
+  return Math.round(n * 100) / 100;
+}
 
 // Get bill by ID
 export function getBillById(id: number): Bill | null {
@@ -57,11 +74,12 @@ export function addBillItem(
   operatorName: string
 ): BillItem {
   const totalPrice = data.quantity * data.unit_price;
-  
+  const ts = new Date().toISOString();
+
   const result = run(
     `INSERT INTO bill_items 
-     (bill_id, item_name, item_type, room_id, room_name, operator_id, operator_name, quantity, unit_price, total_price, notes, inventory_id) 
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (bill_id, item_name, item_type, room_id, room_name, operator_id, operator_name, quantity, unit_price, total_price, notes, inventory_id, created_at) 
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       billId,
       data.item_name,
@@ -75,21 +93,63 @@ export function addBillItem(
       totalPrice,
       data.notes || null,
       data.inventory_id || null,
+      ts,
     ]
   );
-  
-  // Update bill totals
-  updateBillTotals(billId);
-  
-  // Deduct from inventory if applicable
+
+  // Deduct from inventory after line item exists (rollback line if stock fails)
   if (data.inventory_id && data.quantity > 0) {
-    run(
-      'UPDATE inventory SET stock_quantity = stock_quantity - ? WHERE id = ?',
-      [data.quantity, data.inventory_id]
-    );
+    const inv = deductStock(data.inventory_id, data.quantity);
+    if (!inv.success) {
+      run('DELETE FROM bill_items WHERE id = ?', [result.lastInsertRowid]);
+      updateBillTotals(billId);
+      throw new Error(inv.error || 'Insufficient stock');
+    }
   }
-  
+
+  updateBillTotals(billId);
+
   return getOne('SELECT * FROM bill_items WHERE id = ?', [result.lastInsertRowid]) as BillItem;
+}
+
+// Update bill item (with inventory stock adjustment when quantity changes)
+export function updateBillItem(
+  itemId: number,
+  updates: Partial<Pick<BillItem, 'item_name' | 'quantity' | 'unit_price' | 'notes'>>
+): BillItem | null {
+  const item = getOne('SELECT * FROM bill_items WHERE id = ?', [itemId]) as BillItem | null;
+  if (!item) return null;
+
+  const nextName = (updates.item_name ?? item.item_name)?.toString().trim();
+  const nextQtyRaw = updates.quantity ?? item.quantity;
+  const nextUnitRaw = updates.unit_price ?? item.unit_price;
+  const nextQty = Number(nextQtyRaw);
+  const nextUnit = Number(nextUnitRaw);
+
+  if (!nextName) throw new Error('Item name is required');
+  if (!Number.isFinite(nextQty) || nextQty <= 0) throw new Error('Quantity must be greater than zero');
+  if (!Number.isFinite(nextUnit) || nextUnit <= 0) throw new Error('Unit price must be greater than zero');
+
+  // If this line is linked to inventory, reconcile stock by quantity delta.
+  if (item.inventory_id && Number(item.inventory_id) > 0) {
+    const prevQty = Number(item.quantity) || 0;
+    const delta = nextQty - prevQty;
+    if (delta > 0) {
+      const inv = deductStock(Number(item.inventory_id), delta);
+      if (!inv.success) throw new Error(inv.error || 'Insufficient stock');
+    } else if (delta < 0) {
+      addStock(Number(item.inventory_id), Math.abs(delta));
+    }
+  }
+
+  const totalPrice = roundMoney(nextQty * nextUnit);
+  run(
+    'UPDATE bill_items SET item_name = ?, quantity = ?, unit_price = ?, total_price = ?, notes = ? WHERE id = ?',
+    [nextName, nextQty, nextUnit, totalPrice, updates.notes ?? item.notes ?? null, itemId]
+  );
+  updateBillTotals(item.bill_id);
+
+  return getOne('SELECT * FROM bill_items WHERE id = ?', [itemId]) as BillItem | null;
 }
 
 // Remove bill item
@@ -99,12 +159,9 @@ export function removeBillItem(itemId: number): boolean {
   
   // Restore inventory if applicable
   if (item.inventory_id && item.quantity > 0) {
-    run(
-      'UPDATE inventory SET stock_quantity = stock_quantity + ? WHERE id = ?',
-      [item.quantity, item.inventory_id]
-    );
+    addStock(item.inventory_id, item.quantity);
   }
-  
+
   run('DELETE FROM bill_items WHERE id = ?', [itemId]);
   updateBillTotals(item.bill_id);
   
@@ -117,33 +174,40 @@ function updateBillTotals(billId: number): void {
     'SELECT COALESCE(SUM(total_price), 0) as total FROM bill_items WHERE bill_id = ?',
     [billId]
   );
-  
+
   const bill = getBillById(billId);
   if (!bill) return;
-  
-  const totalAmount = totals.total || 0;
-  const discountAmount = (totalAmount * bill.discount_percent) / 100;
-  const finalAmount = totalAmount - discountAmount;
-  
+
+  const totalAmount = roundMoney(Number(totals?.total) || 0);
+  const pct = Number(bill.discount_percent) || 0;
+  const discountAmount = roundMoney((totalAmount * pct) / 100);
+  const finalAmount = roundMoney(totalAmount - discountAmount);
+  const ts = new Date().toISOString();
+
   run(
-    'UPDATE bills SET total_amount = ?, discount_amount = ?, final_amount = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-    [totalAmount, discountAmount, finalAmount, billId]
+    'UPDATE bills SET total_amount = ?, discount_amount = ?, final_amount = ?, updated_at = ? WHERE id = ?',
+    [totalAmount, discountAmount, finalAmount, ts, billId]
   );
+
+  updatePaymentStatus(billId);
 }
 
 // Apply discount
 export function applyDiscount(billId: number, discountPercent: number): Bill | null {
   const bill = getBillById(billId);
   if (!bill) return null;
-  
-  const discountAmount = (bill.total_amount * discountPercent) / 100;
-  const finalAmount = bill.total_amount - discountAmount;
-  
+
+  const totalAmount = roundMoney(Number(bill.total_amount) || 0);
+  const discountAmount = roundMoney((totalAmount * discountPercent) / 100);
+  const finalAmount = roundMoney(totalAmount - discountAmount);
+  const ts = new Date().toISOString();
+
   run(
-    'UPDATE bills SET discount_percent = ?, discount_amount = ?, final_amount = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-    [discountPercent, discountAmount, finalAmount, billId]
+    'UPDATE bills SET discount_percent = ?, discount_amount = ?, final_amount = ?, updated_at = ? WHERE id = ?',
+    [discountPercent, discountAmount, finalAmount, ts, billId]
   );
-  
+
+  updatePaymentStatus(billId);
   return getBillById(billId);
 }
 
@@ -154,16 +218,18 @@ export function addPayment(
   receivedBy: number,
   receivedByName: string
 ): Payment {
+  const amount = roundMoney(Number(data.amount) || 0);
   const result = run(
-    'INSERT INTO payments (bill_id, amount, payment_method, transaction_id, notes, received_by, received_by_name) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO payments (bill_id, amount, payment_method, transaction_id, notes, received_by, received_by_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     [
       billId,
-      data.amount,
+      amount,
       data.payment_method,
       data.transaction_id || null,
       data.notes || null,
       receivedBy,
       receivedByName,
+      new Date().toISOString(),
     ]
   );
   
@@ -183,20 +249,22 @@ function updatePaymentStatus(billId: number): void {
     [billId]
   );
   
-  const paidAmount = payments.total || 0;
+  const paidAmount = roundMoney(Number(payments?.total) || 0);
+  const finalAmt = roundMoney(Number(bill.final_amount) || 0);
   let paymentStatus: string;
-  
-  if (paidAmount >= bill.final_amount) {
+
+  if (paidAmount >= finalAmt && finalAmt > 0) {
     paymentStatus = 'paid';
   } else if (paidAmount > 0) {
     paymentStatus = 'partial';
   } else {
     paymentStatus = 'pending';
   }
-  
+
+  const ts = new Date().toISOString();
   run(
-    'UPDATE bills SET paid_amount = ?, payment_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-    [paidAmount, paymentStatus, billId]
+    'UPDATE bills SET paid_amount = ?, payment_status = ?, updated_at = ? WHERE id = ?',
+    [paidAmount, paymentStatus, ts, billId]
   );
 }
 
@@ -248,20 +316,86 @@ export function getPendingBills(): Bill[] {
   ) as Bill[];
 }
 
-// Search bills
+/** Active bills with owner/pet names for billing UI lists. */
+export function getPendingBillsForDisplay() {
+  return (listTable('bills') as Bill[])
+    .filter((b) => {
+      const billStatus = String(b.status ?? '').toLowerCase();
+      const payStatus = String(b.payment_status ?? '').toLowerCase();
+
+      // Pending bills = not completed/cancelled AND not fully paid.
+      // Using this logic (instead of only `status === "active"`) makes the UI resilient
+      // to legacy rows / any case differences in the in-memory DB.
+      const isCancelled = billStatus === 'cancelled';
+      const isCompleted = billStatus === 'completed';
+      const isPaid = payStatus === 'paid';
+      return !isCancelled && !isCompleted && !isPaid;
+    })
+    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+    .slice(0, 25)
+    .map((b) => enrichBillForList(b));
+}
+
+function isPendingBillForBillingUI(b: Bill): boolean {
+  const billStatus = String(b.status ?? '').toLowerCase();
+  const payStatus = String(b.payment_status ?? '').toLowerCase();
+
+  // "Pending" = not completed/cancelled AND not fully paid
+  return billStatus !== 'cancelled' && billStatus !== 'completed' && payStatus !== 'paid';
+}
+
+/**
+ * Billing page list:
+ * - Pending bills at the top
+ * - Completed/paid bills below
+ */
+export function getBillsForBillingPageDisplay() {
+  const all = (listTable('bills') as Bill[]).map((b) => enrichBillForList(b));
+
+  const pending = all
+    .filter((b) => isPendingBillForBillingUI(b))
+    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+    .slice(0, 50);
+
+  const completedPaid = all
+    .filter((b) => !isPendingBillForBillingUI(b) && String(b.status ?? '').toLowerCase() !== 'cancelled')
+    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+    .slice(0, 50);
+
+  return { pending, completedPaid };
+}
+
+// Search bills (in-memory DB: scan bills + patient/animal — no SQL JOIN)
 export function searchBills(searchTerm: string) {
-  const bills = query(
-    `SELECT b.*, p.owner_name, p.owner_phone, a.name as animal_name
-     FROM bills b
-     JOIN patients p ON b.patient_id = p.id
-     JOIN animals a ON b.animal_id = a.id
-     WHERE b.bill_code LIKE ? OR p.owner_name LIKE ? OR p.owner_phone LIKE ?
-     ORDER BY b.created_at DESC
-     LIMIT 20`,
-    [`%${searchTerm}%`, `%${searchTerm}%`, `%${searchTerm}%`]
+  const term = searchTerm.trim().toLowerCase();
+  const allBills = listTable('bills') as Bill[];
+  const sorted = [...allBills].sort((a, b) =>
+    String(b.created_at || '').localeCompare(String(a.created_at || ''))
   );
-  
-  return bills;
+  const enriched = sorted.map((b) => enrichBillForList(b));
+
+  if (!term) {
+    return enriched.slice(0, 20);
+  }
+
+  const digits = term.replace(/\D/g, '');
+  const tokens = listTable('tokens') as { id: number; bill_id: number; token_number: number; date?: string }[];
+
+  return enriched
+    .filter((b) => {
+      if (String(b.bill_code).toLowerCase().includes(term)) return true;
+      if (String(b.owner_name).toLowerCase().includes(term)) return true;
+      if (String(b.owner_phone).toLowerCase().includes(term)) return true;
+      const phoneDigits = String(b.owner_phone || '').replace(/\D/g, '');
+      if (digits.length >= 2 && phoneDigits.includes(digits)) return true;
+      if (String(b.animal_name).toLowerCase().includes(term)) return true;
+      if (/^\d+$/.test(term)) {
+        const n = parseInt(term, 10);
+        return tokens.some((t) => t.bill_id === b.id && t.token_number === n);
+      }
+      return false;
+    })
+    .slice(0, 20);
 }
 
 // Get bill statistics

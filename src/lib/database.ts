@@ -127,28 +127,142 @@ function insert(table: string, data: any): number {
   return id;
 }
 
+function extractFromTable(sql: string): string | null {
+  const m = sql.match(/\bFROM\s+(\w+)/i);
+  return m ? m[1] : null;
+}
+
+function extractWhereClause(sql: string): string | null {
+  const lower = sql.toLowerCase();
+  const i = lower.indexOf(' where ');
+  if (i < 0) return null;
+  const rest = sql.slice(i + 7);
+  const stop = rest.search(/\s+ORDER\s+BY|\s+LIMIT|\s+GROUP\s+BY/i);
+  const clause = (stop >= 0 ? rest.slice(0, stop) : rest).trim();
+  return clause || null;
+}
+
+function filterLikeOrWhere(rows: any[], whereClause: string, params: any[]): any[] {
+  const orParts = whereClause.split(/\s+OR\s+/i).map((s) => s.trim());
+  return rows.filter((row) => {
+    let paramIndex = 0;
+    for (const part of orParts) {
+      const m = part.match(/^(\w+)\s+LIKE\s+\?$/i);
+      if (m) {
+        const pat = String(params[paramIndex] ?? '');
+        paramIndex++;
+        const needle = pat.replace(/^%|%$/g, '').toLowerCase();
+        const hay = String(row[m[1]] ?? '').toLowerCase();
+        if (needle === '' || hay.includes(needle)) return true;
+      }
+    }
+    return false;
+  });
+}
+
+function filterWhere(rows: any[], whereClause: string, params: any[]): any[] {
+  if (/\bLIKE\b/i.test(whereClause) && /\s+OR\s+/i.test(whereClause)) {
+    return filterLikeOrWhere(rows, whereClause, params);
+  }
+  return filterByWhereClause(rows, whereClause, params);
+}
+
+/** Loose match for SQL `=?` (ids often differ as number vs string after JSON/localStorage). */
+function rowValueEquals(cell: any, param: any): boolean {
+  if (Object.is(cell, param)) return true;
+  if (cell == null || param == null) return cell == null && param == null;
+  if (typeof cell === 'boolean' || typeof param === 'boolean') {
+    return Boolean(cell) === Boolean(param);
+  }
+  if (typeof cell === 'number' || typeof param === 'number') {
+    return Number(cell) === Number(param);
+  }
+  const cn = Number(cell);
+  const pn = Number(param);
+  if (
+    cell !== '' &&
+    param !== '' &&
+    !Number.isNaN(cn) &&
+    !Number.isNaN(pn) &&
+    String(cn) === String(String(cell).trim()) &&
+    String(pn) === String(String(param).trim())
+  ) {
+    return cn === pn;
+  }
+  return String(cell) === String(param);
+}
+
+/** AND-combined conditions: col = ?, literals, col IN (...), col != 'x', DATE(col) = ? */
+function filterByWhereClause(rows: any[], whereClause: string, params: any[]): any[] {
+  const parts = whereClause.split(/\s+AND\s+/i).map((s) => s.trim());
+  return rows.filter((row) => {
+    let paramIndex = 0;
+    for (const part of parts) {
+      const dateEq = part.match(/^DATE\s*\(\s*(\w+)\s*\)\s*=\s*\?$/i);
+      if (dateEq) {
+        const col = dateEq[1];
+        const want = String(params[paramIndex] ?? '').split('T')[0];
+        const got = String(row[col] ?? '').split('T')[0];
+        if (got !== want) return false;
+        paramIndex++;
+        continue;
+      }
+      const eqQ = part.match(/^(\w+)\s*=\s*\?$/i);
+      if (eqQ) {
+        if (!rowValueEquals(row[eqQ[1]], params[paramIndex])) return false;
+        paramIndex++;
+        continue;
+      }
+      const eqNum = part.match(/^(\w+)\s*=\s*(\d+)$/i);
+      if (eqNum) {
+        const v = row[eqNum[1]];
+        if (Number(v) !== Number(eqNum[2]) && v != eqNum[2]) return false;
+        continue;
+      }
+      const eqStr = part.match(/^(\w+)\s*=\s*'([^']*)'$/i);
+      if (eqStr) {
+        if (String(row[eqStr[1]]) !== eqStr[2]) return false;
+        continue;
+      }
+      const neStr = part.match(/^(\w+)\s*!=\s*'([^']*)'$/i);
+      if (neStr) {
+        if (String(row[neStr[1]]) === neStr[2]) return false;
+        continue;
+      }
+      const inList = part.match(/^(\w+)\s+IN\s*\(([^)]+)\)$/i);
+      if (inList) {
+        const col = inList[1];
+        const vals = inList[2].split(',').map((s) => s.trim().replace(/^'|'$/g, ''));
+        const cell = row[col];
+        if (!vals.some((v) => rowValueEquals(cell, v))) return false;
+        continue;
+      }
+      return false;
+    }
+    return true;
+  });
+}
+
 // Query helpers
 export function query(sql: string, params: any[] = []): any[] {
-  // Simple SQL parsing for basic queries
   const lowerSql = sql.toLowerCase().trim();
-  
-  // Extract table name from SELECT
-  const selectMatch = lowerSql.match(/from\s+(\w+)/);
+
+  const selectMatch = lowerSql.match(/\bfrom\s+(\w+)/);
   if (!selectMatch) return [];
-  
+
   const table = selectMatch[1];
   if (!db[table]) return [];
-  
+
   let results = Object.values(db[table]);
-  
-  // Handle WHERE clauses
-  const whereMatch = lowerSql.match(/where\s+(.+?)(?:order|limit|$)/i);
-  if (whereMatch && params.length > 0) {
-    // Simple param matching
-    results = results.filter(row => {
+
+  const whereClause = extractWhereClause(sql);
+  if (whereClause) {
+    results = filterWhere(results, whereClause, params);
+  } else if (params.length > 0) {
+    // Legacy: LIKE search across tables that don't use structured WHERE
+    results = results.filter((row) => {
       for (let i = 0; i < params.length; i++) {
         const param = params[i];
-        // Check if any field matches
         for (const key of Object.keys(row)) {
           if (row[key] === param) return true;
           if (typeof row[key] === 'string' && row[key].toLowerCase().includes(String(param).toLowerCase())) return true;
@@ -157,8 +271,7 @@ export function query(sql: string, params: any[] = []): any[] {
       return false;
     });
   }
-  
-  // Handle ORDER BY
+
   const orderMatch = lowerSql.match(/order\s+by\s+(\w+)(?:\s+(asc|desc))?/i);
   if (orderMatch) {
     const field = orderMatch[1];
@@ -169,14 +282,13 @@ export function query(sql: string, params: any[] = []): any[] {
       return 0;
     });
   }
-  
-  // Handle LIMIT
-  const limitMatch = lowerSql.match(/limit\s+(\d+)/);
+
+  const limitMatch = lowerSql.match(/limit\s+(\d+)/i);
   if (limitMatch) {
-    const limit = parseInt(limitMatch[1]);
+    const limit = parseInt(limitMatch[1], 10);
     results = results.slice(0, limit);
   }
-  
+
   return results;
 }
 
@@ -259,6 +371,46 @@ function paramsToObject(sql: string, params: any[]): any {
 }
 
 export function getOne(sql: string, params: any[] = []): any | null {
+  const s = sql.trim();
+
+  const countM = s.match(/SELECT\s+COUNT\(\*\)\s+AS\s+(\w+)/i);
+  if (countM) {
+    const tbl = extractFromTable(s);
+    if (!tbl || !db[tbl]) return { [countM[1]]: 0 } as any;
+    let rows = Object.values(db[tbl]);
+    const wc = extractWhereClause(s);
+    if (wc) rows = filterWhere(rows, wc, params);
+    return { [countM[1]]: rows.length } as any;
+  }
+
+  const sumM = s.match(
+    /SELECT\s+COALESCE\s*\(\s*SUM\s*\(\s*(\w+)\s*\)\s*,\s*[^)]+\)\s+AS\s+(\w+)/i
+  );
+  if (sumM) {
+    const sumCol = sumM[1];
+    const alias = sumM[2];
+    const tbl = extractFromTable(s);
+    if (!tbl || !db[tbl]) return { [alias]: 0 } as any;
+    let rows = Object.values(db[tbl]);
+    const wc = extractWhereClause(s);
+    if (wc) rows = filterWhere(rows, wc, params);
+    const total = rows.reduce((acc, r) => acc + (Number(r[sumCol]) || 0), 0);
+    return { [alias]: total } as any;
+  }
+
+  const maxM = s.match(/SELECT\s+MAX\s*\(\s*(\w+)\s*\)\s+AS\s+(\w+)/i);
+  if (maxM) {
+    const col = maxM[1];
+    const alias = maxM[2];
+    const tbl = extractFromTable(s);
+    if (!tbl || !db[tbl]) return { [alias]: null } as any;
+    let rows = Object.values(db[tbl]);
+    const wc = extractWhereClause(s);
+    if (wc) rows = filterWhere(rows, wc, params);
+    const nums = rows.map((r) => Number(r[col])).filter((n) => !Number.isNaN(n));
+    return { [alias]: nums.length ? Math.max(...nums) : null } as any;
+  }
+
   const results = query(sql, params);
   return results.length > 0 ? results[0] : null;
 }
@@ -266,6 +418,12 @@ export function getOne(sql: string, params: any[] = []): any | null {
 // Get database instance
 export function getDb() {
   return db;
+}
+
+/** All rows in a table (in-memory store has no real SQL engine). */
+export function listTable(table: string): any[] {
+  if (!db[table]) return [];
+  return Object.values(db[table]);
 }
 
 // Check if database is ready

@@ -135,13 +135,20 @@ export function ReportsModule() {
                           </tr>
                         </thead>
                         <tbody>
-                          {dailyReport.room_wise.map((room: any) => (
-                            <tr key={room.room_id} className="border-b border-slate-100">
+                          {(dailyReport.room_wise?.length ? dailyReport.room_wise : []).map((room: any) => (
+                            <tr key={`${room.room_id}-${room.room_name}`} className="border-b border-slate-100">
                               <td className="py-2 px-4">{room.room_name}</td>
                               <td className="py-2 px-4 text-right">{room.item_count}</td>
                               <td className="py-2 px-4 text-right">₹{room.total_charges.toLocaleString()}</td>
                             </tr>
                           ))}
+                          {(!dailyReport.room_wise || dailyReport.room_wise.length === 0) && (
+                            <tr>
+                              <td colSpan={3} className="py-6 px-4 text-center text-slate-500 text-sm">
+                                No line items for completed bills on this date.
+                              </td>
+                            </tr>
+                          )}
                         </tbody>
                       </table>
                     </div>
@@ -160,13 +167,20 @@ export function ReportsModule() {
                           </tr>
                         </thead>
                         <tbody>
-                          {dailyReport.payment_wise.map((payment: any) => (
+                          {(dailyReport.payment_wise?.length ? dailyReport.payment_wise : []).map((payment: any) => (
                             <tr key={payment.payment_method} className="border-b border-slate-100">
                               <td className="py-2 px-4 capitalize">{payment.payment_method}</td>
                               <td className="py-2 px-4 text-right">{payment.count}</td>
                               <td className="py-2 px-4 text-right">₹{payment.total_amount.toLocaleString()}</td>
                             </tr>
                           ))}
+                          {(!dailyReport.payment_wise || dailyReport.payment_wise.length === 0) && (
+                            <tr>
+                              <td colSpan={3} className="py-6 px-4 text-center text-slate-500 text-sm">
+                                No payments recorded for this date.
+                              </td>
+                            </tr>
+                          )}
                         </tbody>
                       </table>
                     </div>
@@ -260,13 +274,20 @@ export function ReportsModule() {
                           </tr>
                         </thead>
                         <tbody>
-                          {rangeReport.daily_breakdown.map((day: any) => (
+                          {(rangeReport.daily_breakdown?.length ? rangeReport.daily_breakdown : []).map((day: any) => (
                             <tr key={day.date} className="border-b border-slate-100">
                               <td className="py-2 px-4">{day.date}</td>
                               <td className="py-2 px-4 text-right">{day.bill_count}</td>
                               <td className="py-2 px-4 text-right">₹{day.revenue.toLocaleString()}</td>
                             </tr>
                           ))}
+                          {(!rangeReport.daily_breakdown || rangeReport.daily_breakdown.length === 0) && (
+                            <tr>
+                              <td colSpan={3} className="py-6 px-4 text-center text-slate-500 text-sm">
+                                No completed bills in this range.
+                              </td>
+                            </tr>
+                          )}
                         </tbody>
                       </table>
                     </div>
@@ -302,12 +323,19 @@ export function ReportsModule() {
                   </thead>
                   <tbody>
                     {doctorReport.map((doctor: any) => (
-                      <tr key={doctor.doctor_id} className="border-b border-slate-100">
+                      <tr key={`${doctor.doctor_id}-${doctor.doctor_name}`} className="border-b border-slate-100">
                         <td className="py-2 px-4">{doctor.doctor_name}</td>
                         <td className="py-2 px-4 text-right">{doctor.total_patients}</td>
                         <td className="py-2 px-4 text-right">₹{doctor.total_charges.toLocaleString()}</td>
                       </tr>
                     ))}
+                    {doctorReport.length === 0 && (
+                      <tr>
+                        <td colSpan={3} className="py-6 px-4 text-center text-slate-500 text-sm">
+                          No consultation charges on completed bills yet.
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -360,13 +388,20 @@ export function ReportsModule() {
                           </tr>
                         </thead>
                         <tbody>
-                          {medicineReport.item_wise.map((item: any) => (
+                          {(medicineReport.item_wise?.length ? medicineReport.item_wise : []).map((item: any) => (
                             <tr key={item.item_name} className="border-b border-slate-100">
                               <td className="py-2 px-4">{item.item_name}</td>
                               <td className="py-2 px-4 text-right">{item.total_quantity}</td>
                               <td className="py-2 px-4 text-right">₹{item.total_revenue.toLocaleString()}</td>
                             </tr>
                           ))}
+                          {(!medicineReport.item_wise || medicineReport.item_wise.length === 0) && (
+                            <tr>
+                              <td colSpan={3} className="py-6 px-4 text-center text-slate-500 text-sm">
+                                No medicine sales on completed bills yet.
+                              </td>
+                            </tr>
+                          )}
                         </tbody>
                       </table>
                     </div>

@@ -14,7 +14,7 @@ import {
   Package
 } from 'lucide-react';
 import { getLowStockItems } from '@/lib/services/inventoryService';
-import { getTodayTokens } from '@/lib/services/tokenService';
+import { getTodayTokensForDashboard } from '@/lib/services/tokenService';
 import { toast } from 'sonner';
 
 interface DashboardHomeProps {
@@ -29,14 +29,14 @@ export function DashboardHome({ stats, onRefresh }: DashboardHomeProps) {
 
   useEffect(() => {
     loadAdditionalData();
-  }, []);
+  }, [stats]);
 
   const loadAdditionalData = () => {
     try {
       const lowStockItems = getLowStockItems();
       setLowStock(lowStockItems.slice(0, 5));
 
-      const tokens = getTodayTokens();
+      const tokens = getTodayTokensForDashboard();
       setRecentTokens(tokens.slice(0, 5));
     } catch (error) {
       console.error('Failed to load additional data:', error);
@@ -153,8 +153,8 @@ export function DashboardHome({ stats, onRefresh }: DashboardHomeProps) {
                     {recentTokens.map((token) => (
                       <tr key={token.id} className="border-b border-slate-100">
                         <td className="py-3 font-medium">#{token.token_number}</td>
-                        <td className="py-3 text-sm">-</td>
-                        <td className="py-3 text-sm">-</td>
+                        <td className="py-3 text-sm">{token.patient_name}</td>
+                        <td className="py-3 text-sm">{token.animal_name}</td>
                         <td className="py-3">
                           <Badge className={getStatusBadge(token.status)}>
                             {token.status}

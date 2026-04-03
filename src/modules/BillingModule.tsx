@@ -4,22 +4,45 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { 
-  Search, 
-  CreditCard, 
-  Printer, 
+import {
+  Search,
+  CreditCard,
+  Printer,
   CheckCircle,
   Clock,
   User,
   PawPrint,
   Receipt,
-  Percent
+  Percent,
+  Ticket,
+  Pencil,
+  Trash2,
+  Save,
+  X,
 } from 'lucide-react';
-import { getBillWithDetails, searchBills, applyDiscount, addPayment, completeBill } from '@/lib/services/billingService';
+import {
+  getBillWithDetails,
+  searchBills,
+  applyDiscount,
+  addPayment,
+  completeBill,
+  getBillsForBillingPageDisplay,
+  updateBillItem,
+  removeBillItem,
+} from '@/lib/services/billingService';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
+
+function formatRupee(value: unknown): string {
+  const n = Number(value);
+  if (Number.isNaN(n)) return '0';
+  return n.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+function billBalance(bill: { final_amount?: unknown; paid_amount?: unknown }): number {
+  return Math.round((Number(bill.final_amount) || 0) * 100 - (Number(bill.paid_amount) || 0) * 100) / 100;
+}
 
 export function BillingModule() {
   const { user } = useAuth();
@@ -27,6 +50,7 @@ export function BillingModule() {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [currentBill, setCurrentBill] = useState<any>(null);
   const [pendingBills, setPendingBills] = useState<any[]>([]);
+  const [completedPaidBills, setCompletedPaidBills] = useState<any[]>([]);
 
   // Payment form
   const [paymentAmount, setPaymentAmount] = useState('');
@@ -35,37 +59,73 @@ export function BillingModule() {
 
   // Discount form
   const [discountPercent, setDiscountPercent] = useState('');
+  // Bill-item edit form
+  const [editingItemId, setEditingItemId] = useState<number | null>(null);
+  const [editItemName, setEditItemName] = useState('');
+  const [editItemQty, setEditItemQty] = useState('');
+  const [editItemPrice, setEditItemPrice] = useState('');
 
   useEffect(() => {
-    loadPendingBills();
+    loadBills();
   }, []);
 
-  const loadPendingBills = () => {
-    const bills = searchBills('');
-    setPendingBills(bills.filter((b: any) => b.status === 'active').slice(0, 10));
+  const loadBills = () => {
+    const grouped = getBillsForBillingPageDisplay();
+    setPendingBills(grouped.pending);
+    setCompletedPaidBills(grouped.completedPaid);
   };
 
-  const handleSearch = () => {
-    if (!searchTerm.trim()) return;
-    
-    const results = searchBills(searchTerm);
+  const performSearch = (term: string) => {
+    const t = term.trim();
+    if (!t) {
+      setSearchResults([]);
+      return;
+    }
+    const results = searchBills(t);
     setSearchResults(results);
   };
 
   const handleSelectBill = (bill: any) => {
-    const billDetails = getBillWithDetails(bill.id);
-    if (billDetails) {
-      setCurrentBill(billDetails);
-      setSearchResults([]);
-      setSearchTerm('');
+    const billId = Number(bill?.id);
+    if (!Number.isFinite(billId)) return;
+
+    // Optimistic render: allow payments even if getBillWithDetails fails.
+    setCurrentBill({
+      bill,
+      patient: bill.owner_name
+        ? { owner_name: bill.owner_name, owner_phone: bill.owner_phone ?? '' }
+        : null,
+      animal: bill.animal_name ? { name: bill.animal_name } : null,
+      token: null,
+      items: [],
+      payments: [],
+      medicalRecords: [],
+    });
+
+    try {
+      const billDetails = getBillWithDetails(billId);
+      if (billDetails) setCurrentBill(billDetails);
+      else toast.error('Bill details not found, but you can still take payment.');
+
+      loadBills();
+      if (searchTerm.trim()) performSearch(searchTerm);
+    } catch (e) {
+      console.error(e);
+      toast.error('Failed to load bill details. Try again.');
     }
   };
 
   const handleApplyDiscount = () => {
     if (!currentBill || !discountPercent) return;
 
+    const pct = parseFloat(discountPercent);
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+      toast.error('Enter discount between 0 and 100');
+      return;
+    }
+
     try {
-      applyDiscount(currentBill.bill.id, parseFloat(discountPercent));
+      applyDiscount(currentBill.bill.id, pct);
       const updatedBill = getBillWithDetails(currentBill.bill.id);
       setCurrentBill(updatedBill);
       toast.success('Discount applied');
@@ -76,13 +136,17 @@ export function BillingModule() {
   };
 
   const handleAddPayment = () => {
-    if (!currentBill || !paymentAmount || !user) return;
+    if (!currentBill || !user) return;
 
     const amount = parseFloat(paymentAmount);
-    const remaining = currentBill.bill.final_amount - currentBill.bill.paid_amount;
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error('Enter a valid amount');
+      return;
+    }
 
-    if (amount > remaining) {
-      toast.error(`Amount exceeds remaining balance (₹${remaining})`);
+    const remaining = billBalance(currentBill.bill);
+    if (amount > remaining + 0.001) {
+      toast.error(`Amount exceeds balance (₹${formatRupee(remaining)})`);
       return;
     }
 
@@ -100,8 +164,9 @@ export function BillingModule() {
 
       const updatedBill = getBillWithDetails(currentBill.bill.id);
       setCurrentBill(updatedBill);
+      loadBills();
       toast.success('Payment recorded');
-      
+
       setPaymentAmount('');
       setTransactionId('');
     } catch (error) {
@@ -109,20 +174,31 @@ export function BillingModule() {
     }
   };
 
+  const handlePayFullBalance = () => {
+    if (!currentBill || !user) return;
+    const remaining = billBalance(currentBill.bill);
+    if (remaining <= 0) {
+      toast.message('No balance due');
+      return;
+    }
+    setPaymentAmount(String(remaining));
+  };
+
   const handleCompleteBill = () => {
     if (!currentBill) return;
 
-    const remaining = currentBill.bill.final_amount - currentBill.bill.paid_amount;
-    if (remaining > 0) {
-      toast.error(`₹${remaining} still pending`);
+    const remaining = billBalance(currentBill.bill);
+    if (remaining > 0.01) {
+      toast.error(`₹${formatRupee(remaining)} still due`);
       return;
     }
 
     try {
-      completeBill(currentBill.bill.id, currentBill.bill.payment_method);
+      const method = currentBill.bill.payment_method || paymentMethod || 'cash';
+      completeBill(currentBill.bill.id, method);
       toast.success('Bill completed successfully');
       setCurrentBill(null);
-      loadPendingBills();
+      loadBills();
     } catch (error) {
       toast.error('Failed to complete bill');
     }
@@ -132,6 +208,81 @@ export function BillingModule() {
     toast.info('Printing invoice...');
     // In a real app, this would trigger a print dialog
     window.print();
+  };
+
+  const refreshCurrentBill = (billId: number) => {
+    const updatedBill = getBillWithDetails(billId);
+    if (updatedBill) setCurrentBill(updatedBill);
+    loadBills();
+    if (searchTerm.trim()) performSearch(searchTerm);
+  };
+
+  const startEditItem = (item: any) => {
+    setEditingItemId(Number(item.id));
+    setEditItemName(String(item.item_name ?? ''));
+    setEditItemQty(String(item.quantity ?? 1));
+    setEditItemPrice(String(item.unit_price ?? 0));
+  };
+
+  const cancelEditItem = () => {
+    setEditingItemId(null);
+    setEditItemName('');
+    setEditItemQty('');
+    setEditItemPrice('');
+  };
+
+  const handleSaveItemEdit = (itemId: number) => {
+    if (!currentBill?.bill?.id) return;
+    const name = editItemName.trim();
+    const qty = parseInt(editItemQty, 10);
+    const price = parseFloat(editItemPrice);
+    if (!name) {
+      toast.error('Item name is required');
+      return;
+    }
+    if (!Number.isFinite(qty) || qty < 1) {
+      toast.error('Quantity must be at least 1');
+      return;
+    }
+    if (!Number.isFinite(price) || price <= 0) {
+      toast.error('Unit price must be greater than 0');
+      return;
+    }
+
+    try {
+      const updated = updateBillItem(itemId, {
+        item_name: name,
+        quantity: qty,
+        unit_price: price,
+      });
+      if (!updated) {
+        toast.error('Line item not found');
+        return;
+      }
+      refreshCurrentBill(currentBill.bill.id);
+      cancelEditItem();
+      toast.success('Line item updated');
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to update line item');
+    }
+  };
+
+  const handleDeleteItem = (itemId: number) => {
+    if (!currentBill?.bill?.id) return;
+    const ok = window.confirm('Delete this line item?');
+    if (!ok) return;
+    try {
+      const removed = removeBillItem(itemId);
+      if (!removed) {
+        toast.error('Failed to delete line item');
+        return;
+      }
+      if (editingItemId === itemId) cancelEditItem();
+      refreshCurrentBill(currentBill.bill.id);
+      toast.success('Line item deleted');
+    } catch {
+      toast.error('Failed to delete line item');
+    }
   };
 
   const getStatusBadge = (status: string) => {
@@ -146,16 +297,17 @@ export function BillingModule() {
     return styles[status] || 'bg-gray-100 text-gray-800';
   };
 
-  return (
-    <div className="space-y-6">
-      <Tabs defaultValue="search">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="search">Search Bill</TabsTrigger>
-          <TabsTrigger value="pending">Pending Bills</TabsTrigger>
-        </TabsList>
+  const isPendingBill = (bill: any): boolean => {
+    const billStatus = String(bill?.status ?? '').trim().toLowerCase();
+    const payStatus = String(bill?.payment_status ?? '').trim().toLowerCase();
+    return billStatus !== 'cancelled' && billStatus !== 'completed' && payStatus !== 'paid';
+  };
 
-        {/* Search Tab */}
-        <TabsContent value="search" className="space-y-4">
+  return (
+    <div className="flex flex-col xl:flex-row gap-6 items-start">
+      <div className="w-full xl:w-96 shrink-0">
+      {/* Search mode */}
+      {searchTerm.trim() ? (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -163,16 +315,23 @@ export function BillingModule() {
                 Search Bill
               </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="max-h-[min(70vh,40rem)] overflow-y-auto pr-1">
               <div className="flex gap-2 mb-4">
                 <Input
-                  placeholder="Search by bill code, patient name, or phone..."
+                  placeholder="Bill code, name, phone, or today’s token number…"
                   value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSearchTerm(v);
+                    if (!v.trim()) setSearchResults([]);
+                    else performSearch(v);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') performSearch(searchTerm);
+                  }}
                   className="flex-1"
                 />
-                <Button onClick={handleSearch}>
+                <Button type="button" variant="outline" onClick={() => performSearch(searchTerm)}>
                   <Search className="w-4 h-4 mr-2" />
                   Search
                 </Button>
@@ -181,82 +340,212 @@ export function BillingModule() {
               {searchResults.length > 0 && (
                 <div className="space-y-2">
                   <h3 className="font-medium text-slate-900">Search Results</h3>
-                  {searchResults.map((bill) => (
-                    <Card 
-                      key={bill.id} 
-                      className="cursor-pointer hover:bg-slate-50"
-                      onClick={() => handleSelectBill(bill)}
-                    >
-                      <CardContent className="p-4">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="font-medium">{bill.bill_code}</p>
-                            <p className="text-sm text-slate-500">{bill.owner_name}</p>
-                            <p className="text-sm text-slate-600">{bill.animal_name}</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="font-semibold">₹{bill.final_amount}</p>
-                            <Badge className={getStatusBadge(bill.payment_status)}>
-                              {bill.payment_status}
-                            </Badge>
-                          </div>
+                  {(() => {
+                    const pending = searchResults.filter(isPendingBill);
+                    const completed = searchResults.filter((b) => !isPendingBill(b) && String(b.status ?? '').toLowerCase() !== 'cancelled');
+
+                    return (
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <h4 className="font-medium text-slate-800">Pending</h4>
+                          {pending.length > 0 ? (
+                            <div className="space-y-2">
+                              {pending.map((bill) => (
+                                <Card
+                                  key={bill.id}
+                                  className="cursor-pointer hover:bg-slate-50"
+                                  onClick={() => handleSelectBill(bill)}
+                                >
+                                  <CardContent className="p-4">
+                                    <div className="flex items-center justify-between">
+                                      <div>
+                                        <p className="font-medium">{bill.bill_code}</p>
+                                        <p className="text-sm text-slate-500">{bill.owner_name}</p>
+                                        <p className="text-sm text-slate-600">{bill.animal_name}</p>
+                                      </div>
+                                      <div className="text-right">
+                                        <p className="font-semibold">₹{formatRupee(bill.final_amount)}</p>
+                                        <Badge className={getStatusBadge(bill.payment_status)}>
+                                          {bill.payment_status}
+                                        </Badge>
+                                      </div>
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-slate-500">No pending matches.</p>
+                          )}
                         </div>
-                      </CardContent>
-                    </Card>
-                  ))}
+
+                        <div className="space-y-2">
+                          <h4 className="font-medium text-slate-800">Completed / Paid</h4>
+                          {completed.length > 0 ? (
+                            <div className="space-y-2">
+                              {completed.map((bill) => (
+                                <Card
+                                  key={bill.id}
+                                  className="cursor-pointer hover:bg-slate-50"
+                                  onClick={() => handleSelectBill(bill)}
+                                >
+                                  <CardContent className="p-4">
+                                    <div className="flex items-center justify-between">
+                                      <div>
+                                        <p className="font-medium">{bill.bill_code}</p>
+                                        <p className="text-sm text-slate-500">{bill.owner_name}</p>
+                                        <p className="text-sm text-slate-600">{bill.animal_name}</p>
+                                      </div>
+                                      <div className="text-right">
+                                        <p className="font-semibold">₹{formatRupee(bill.final_amount)}</p>
+                                        <Badge className={getStatusBadge(bill.payment_status)}>
+                                          {bill.payment_status}
+                                        </Badge>
+                                      </div>
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-slate-500">No completed/paid matches.</p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
+              )}
+              {searchResults.length === 0 && (
+                <p className="text-sm text-slate-500">No matching bills.</p>
               )}
             </CardContent>
           </Card>
-        </TabsContent>
-
-        {/* Pending Bills Tab */}
-        <TabsContent value="pending" className="space-y-4">
+      ) : (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Clock className="w-5 h-5" />
-                Pending Bills
+                Bills
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              {pendingBills.length > 0 ? (
-                <div className="space-y-2">
-                  {pendingBills.map((bill) => (
-                    <Card 
-                      key={bill.id} 
-                      className="cursor-pointer hover:bg-slate-50"
-                      onClick={() => handleSelectBill(bill)}
-                    >
-                      <CardContent className="p-4">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="font-medium">{bill.bill_code}</p>
-                            <p className="text-sm text-slate-500">{bill.owner_name}</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="font-semibold">₹{bill.final_amount}</p>
-                            <p className="text-xs text-slate-500">
-                              Paid: ₹{bill.paid_amount}
-                            </p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              ) : (
+            <div className="px-6 pb-3">
+              <div className="flex gap-2 mb-4">
+                <Input
+                  placeholder="Bill code, name, phone, or today’s token number…"
+                  value={searchTerm}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSearchTerm(v);
+                    if (!v.trim()) setSearchResults([]);
+                    else performSearch(v);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') performSearch(searchTerm);
+                  }}
+                  className="flex-1"
+                />
+                <Button type="button" variant="outline" onClick={() => performSearch(searchTerm)}>
+                  <Search className="w-4 h-4 mr-2" />
+                  Search
+                </Button>
+              </div>
+            </div>
+            <CardContent className="max-h-[min(70vh,40rem)] overflow-y-auto pr-1">
+              {pendingBills.length === 0 && completedPaidBills.length === 0 ? (
                 <div className="text-center py-8 text-slate-500">
                   <CheckCircle className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                  <p>No pending bills</p>
+                  <p>No bills found</p>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <h3 className="font-medium text-slate-900">Pending</h3>
+                    {pendingBills.length > 0 ? (
+                      <div className="space-y-2">
+                        {pendingBills.map((bill) => (
+                          <Card
+                            key={bill.id}
+                            className="cursor-pointer hover:bg-slate-50"
+                            onClick={() => handleSelectBill(bill)}
+                          >
+                            <CardContent className="p-4">
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="font-medium">{bill.bill_code}</p>
+                                  <p className="text-sm text-slate-500">{bill.owner_name}</p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="font-semibold">₹{formatRupee(bill.final_amount)}</p>
+                                  <p className="text-xs text-slate-500">
+                                    Paid: ₹{formatRupee(bill.paid_amount)} · Due: ₹{formatRupee(billBalance(bill))}
+                                  </p>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-slate-500">No pending bills.</p>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <h3 className="font-medium text-slate-900">Completed / Paid</h3>
+                    {completedPaidBills.length > 0 ? (
+                      <div className="space-y-2">
+                        {completedPaidBills.map((bill) => (
+                          <Card
+                            key={bill.id}
+                            className="cursor-pointer hover:bg-slate-50"
+                            onClick={() => handleSelectBill(bill)}
+                          >
+                            <CardContent className="p-4">
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="font-medium">{bill.bill_code}</p>
+                                  <p className="text-sm text-slate-500">{bill.owner_name}</p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="font-semibold">₹{formatRupee(bill.final_amount)}</p>
+                                  <Badge className={getStatusBadge(bill.payment_status)}>
+                                    {bill.payment_status}
+                                  </Badge>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-slate-500">No completed/paid bills.</p>
+                    )}
+                  </div>
                 </div>
               )}
             </CardContent>
           </Card>
-        </TabsContent>
-      </Tabs>
+      )}
+      </div>
 
+      <div className="flex-1 min-w-0">
       {/* Bill Details */}
+      {!currentBill && (
+        <Card className="border-2 border-blue-200">
+          <CardHeader className="bg-blue-50">
+            <CardTitle className="flex items-center gap-2">
+              <Receipt className="w-5 h-5" />
+              Bill Details
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-slate-600">
+              Select a bill from the left to manage payment, discount, and completion.
+            </p>
+          </CardContent>
+        </Card>
+      )}
       {currentBill && (
         <Card className="border-2 border-blue-200">
           <CardHeader className="bg-blue-50">
@@ -272,15 +561,23 @@ export function BillingModule() {
           </CardHeader>
           <CardContent className="space-y-6">
             {/* Patient Info */}
-            <div className="flex items-center gap-4 pb-4 border-b">
+            <div className="flex flex-wrap items-center gap-4 pb-4 border-b">
               <div className="flex items-center gap-2">
                 <User className="w-5 h-5 text-slate-400" />
                 <span className="font-medium">{currentBill.patient?.owner_name}</span>
               </div>
               <div className="flex items-center gap-2">
                 <PawPrint className="w-5 h-5 text-slate-400" />
-                <span>{currentBill.animal?.name} ({currentBill.animal?.type})</span>
+                <span>
+                  {currentBill.animal?.name} ({currentBill.animal?.type})
+                </span>
               </div>
+              {currentBill.token?.token_number != null && (
+                <div className="flex items-center gap-2 text-slate-600">
+                  <Ticket className="w-5 h-5 text-slate-400" />
+                  <span className="text-sm font-medium">Token #{currentBill.token.token_number}</span>
+                </div>
+              )}
               <div className="ml-auto">
                 <span className="text-sm text-slate-500">Bill: {currentBill.bill?.bill_code}</span>
               </div>
@@ -298,18 +595,111 @@ export function BillingModule() {
                       <th className="text-right py-2 px-4 text-sm font-medium">Qty</th>
                       <th className="text-right py-2 px-4 text-sm font-medium">Price</th>
                       <th className="text-right py-2 px-4 text-sm font-medium">Total</th>
+                      <th className="text-right py-2 px-4 text-sm font-medium">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {currentBill.items?.map((item: any) => (
-                      <tr key={item.id} className="border-b border-slate-100">
-                        <td className="py-2 px-4 text-sm">{item.item_name}</td>
-                        <td className="py-2 px-4 text-sm text-slate-500">{item.room_name}</td>
-                        <td className="py-2 px-4 text-sm text-right">{item.quantity}</td>
-                        <td className="py-2 px-4 text-sm text-right">₹{item.unit_price}</td>
-                        <td className="py-2 px-4 text-sm text-right">₹{item.total_price}</td>
+                    {currentBill.items?.length ? (
+                      currentBill.items.map((item: any) => (
+                        <tr key={item.id} className="border-b border-slate-100">
+                          {editingItemId === Number(item.id) ? (
+                            <>
+                              <td className="py-2 px-4 text-sm">
+                                <Input
+                                  value={editItemName}
+                                  onChange={(e) => setEditItemName(e.target.value)}
+                                  className="h-8"
+                                />
+                              </td>
+                              <td className="py-2 px-4 text-sm text-slate-500">{item.room_name}</td>
+                              <td className="py-2 px-4 text-sm text-right">
+                                <Input
+                                  type="number"
+                                  min="1"
+                                  value={editItemQty}
+                                  onChange={(e) => setEditItemQty(e.target.value)}
+                                  className="h-8 w-20 ml-auto"
+                                />
+                              </td>
+                              <td className="py-2 px-4 text-sm text-right">
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={editItemPrice}
+                                  onChange={(e) => setEditItemPrice(e.target.value)}
+                                  className="h-8 w-28 ml-auto"
+                                />
+                              </td>
+                              <td className="py-2 px-4 text-sm text-right">
+                                ₹
+                                {formatRupee(
+                                  (Number(editItemQty) || 0) * (Number(editItemPrice) || 0)
+                                )}
+                              </td>
+                              <td className="py-2 px-4">
+                                <div className="flex justify-end gap-1">
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="outline"
+                                    className="h-8 w-8"
+                                    onClick={() => handleSaveItemEdit(Number(item.id))}
+                                  >
+                                    <Save className="w-4 h-4" />
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-8 w-8"
+                                    onClick={cancelEditItem}
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </Button>
+                                </div>
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="py-2 px-4 text-sm">{item.item_name}</td>
+                              <td className="py-2 px-4 text-sm text-slate-500">{item.room_name}</td>
+                              <td className="py-2 px-4 text-sm text-right">{item.quantity}</td>
+                              <td className="py-2 px-4 text-sm text-right">₹{formatRupee(item.unit_price)}</td>
+                              <td className="py-2 px-4 text-sm text-right">₹{formatRupee(item.total_price)}</td>
+                              <td className="py-2 px-4">
+                                <div className="flex justify-end gap-1">
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="outline"
+                                    className="h-8 w-8"
+                                    onClick={() => startEditItem(item)}
+                                  >
+                                    <Pencil className="w-4 h-4" />
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-8 w-8 text-red-600 hover:text-red-700"
+                                    onClick={() => handleDeleteItem(Number(item.id))}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                </div>
+                              </td>
+                            </>
+                          )}
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={6} className="py-6 px-4 text-sm text-center text-slate-500">
+                          No charges yet — total will update when services are added.
+                        </td>
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -320,27 +710,25 @@ export function BillingModule() {
               <div className="w-64 space-y-2">
                 <div className="flex justify-between text-sm">
                   <span>Subtotal:</span>
-                  <span>₹{currentBill.bill.total_amount}</span>
+                  <span>₹{formatRupee(currentBill.bill.total_amount)}</span>
                 </div>
-                {currentBill.bill.discount_amount > 0 && (
+                {Number(currentBill.bill.discount_amount) > 0 && (
                   <div className="flex justify-between text-sm text-green-600">
                     <span>Discount ({currentBill.bill.discount_percent}%):</span>
-                    <span>-₹{currentBill.bill.discount_amount}</span>
+                    <span>-₹{formatRupee(currentBill.bill.discount_amount)}</span>
                   </div>
                 )}
                 <div className="flex justify-between font-semibold text-lg border-t pt-2">
                   <span>Total:</span>
-                  <span>₹{currentBill.bill.final_amount}</span>
+                  <span>₹{formatRupee(currentBill.bill.final_amount)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>Paid:</span>
-                  <span className="text-green-600">₹{currentBill.bill.paid_amount}</span>
+                  <span className="text-green-600">₹{formatRupee(currentBill.bill.paid_amount)}</span>
                 </div>
                 <div className="flex justify-between text-sm font-medium">
                   <span>Balance:</span>
-                  <span className="text-red-600">
-                    ₹{currentBill.bill.final_amount - currentBill.bill.paid_amount}
-                  </span>
+                  <span className="text-red-600">₹{formatRupee(billBalance(currentBill.bill))}</span>
                 </div>
               </div>
             </div>
@@ -401,7 +789,12 @@ export function BillingModule() {
                     onChange={(e) => setTransactionId(e.target.value)}
                   />
                 )}
-                <Button onClick={handleAddPayment} className="w-full">
+                <div className="flex gap-2">
+                  <Button type="button" variant="secondary" className="flex-1" onClick={handlePayFullBalance}>
+                    Fill full balance (₹{formatRupee(billBalance(currentBill.bill))})
+                  </Button>
+                </div>
+                <Button type="button" onClick={handleAddPayment} className="w-full">
                   Record Payment
                 </Button>
               </div>
@@ -413,10 +806,11 @@ export function BillingModule() {
                 <Printer className="w-4 h-4 mr-2" />
                 Print Invoice
               </Button>
-              <Button 
-                onClick={handleCompleteBill} 
+              <Button
+                type="button"
+                onClick={handleCompleteBill}
                 className="flex-1"
-                disabled={currentBill.bill.final_amount - currentBill.bill.paid_amount > 0}
+                disabled={billBalance(currentBill.bill) > 0.01}
               >
                 <CheckCircle className="w-4 h-4 mr-2" />
                 Complete Bill
@@ -425,6 +819,7 @@ export function BillingModule() {
           </CardContent>
         </Card>
       )}
+      </div>
     </div>
   );
 }

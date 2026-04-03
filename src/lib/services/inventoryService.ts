@@ -1,9 +1,11 @@
-import { query, getOne, run } from '../database';
+import { query, getOne, run, listTable } from '../database';
 import type { InventoryItem, InventoryCategory } from '@/types';
 
-// Get all inventory items
+// Get all inventory items (active only — matches typical stock UI)
 export function getAllInventory(): InventoryItem[] {
-  return query('SELECT * FROM inventory ORDER BY name') as InventoryItem[];
+  return (listTable('inventory') as InventoryItem[])
+    .filter((row) => isInventoryActive(row))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
 }
 
 // Get inventory item by ID
@@ -16,27 +18,42 @@ export function getInventoryByCategory(category: InventoryCategory): InventoryIt
   return query('SELECT * FROM inventory WHERE category = ? AND is_active = 1 ORDER BY name', [category]) as InventoryItem[];
 }
 
+function isInventoryActive(row: { is_active?: number | boolean }): boolean {
+  return row.is_active === 1 || row.is_active === true;
+}
+
 // Get low stock items
 export function getLowStockItems(): InventoryItem[] {
-  return query(
-    'SELECT * FROM inventory WHERE stock_quantity <= min_stock_level AND is_active = 1 ORDER BY stock_quantity'
-  ) as InventoryItem[];
+  return (listTable('inventory') as InventoryItem[])
+    .filter(
+      (row) =>
+        isInventoryActive(row) &&
+        (Number(row.stock_quantity) || 0) <= (Number(row.min_stock_level) || 0)
+    )
+    .sort((a, b) => (Number(a.stock_quantity) || 0) - (Number(b.stock_quantity) || 0));
 }
 
 // Search inventory
 export function searchInventory(searchTerm: string): InventoryItem[] {
-  return query(
-    'SELECT * FROM inventory WHERE name LIKE ? OR description LIKE ? ORDER BY name',
-    [`%${searchTerm}%`, `%${searchTerm}%`]
-  ) as InventoryItem[];
+  const q = searchTerm.trim().toLowerCase();
+  if (!q) return [];
+  return (listTable('inventory') as InventoryItem[])
+    .filter(
+      (row) =>
+        isInventoryActive(row) &&
+        (String(row.name).toLowerCase().includes(q) ||
+          String(row.description || '').toLowerCase().includes(q))
+    )
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
 }
 
 // Create inventory item
 export function createInventoryItem(data: Omit<InventoryItem, 'id' | 'created_at' | 'updated_at'>): InventoryItem {
+  const ts = new Date().toISOString();
   const result = run(
     `INSERT INTO inventory 
-     (name, category, description, stock_quantity, min_stock_level, cost_price, selling_price, supplier, expiry_date, is_active) 
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (name, category, description, stock_quantity, min_stock_level, cost_price, selling_price, supplier, expiry_date, is_active, created_at, updated_at) 
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       data.name,
       data.category,
@@ -48,9 +65,11 @@ export function createInventoryItem(data: Omit<InventoryItem, 'id' | 'created_at
       data.supplier || null,
       data.expiry_date || null,
       data.is_active ? 1 : 0,
+      ts,
+      ts,
     ]
   );
-  
+
   return getInventoryItemById(result.lastInsertRowid) as InventoryItem;
 }
 
@@ -101,20 +120,22 @@ export function updateInventoryItem(id: number, updates: Partial<InventoryItem>)
   }
   
   if (sets.length === 0) return getInventoryItemById(id);
-  
-  sets.push('updated_at = CURRENT_TIMESTAMP');
+
+  sets.push('updated_at = ?');
+  values.push(new Date().toISOString());
   values.push(id);
-  
+
   run(`UPDATE inventory SET ${sets.join(', ')} WHERE id = ?`, values);
   return getInventoryItemById(id);
 }
 
-// Add stock
+// Add stock (in-memory UPDATE cannot do column + param; compute in JS)
 export function addStock(id: number, quantity: number): InventoryItem | null {
-  run(
-    'UPDATE inventory SET stock_quantity = stock_quantity + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-    [quantity, id]
-  );
+  const item = getInventoryItemById(id);
+  if (!item) return null;
+  const next = (Number(item.stock_quantity) || 0) + quantity;
+  const ts = new Date().toISOString();
+  run('UPDATE inventory SET stock_quantity = ?, updated_at = ? WHERE id = ?', [next, ts, id]);
   return getInventoryItemById(id);
 }
 
@@ -122,51 +143,71 @@ export function addStock(id: number, quantity: number): InventoryItem | null {
 export function deductStock(id: number, quantity: number): { success: boolean; item?: InventoryItem; error?: string } {
   const item = getInventoryItemById(id);
   if (!item) return { success: false, error: 'Item not found' };
-  
-  if (item.stock_quantity < quantity) {
+
+  const cur = Number(item.stock_quantity) || 0;
+  if (cur < quantity) {
     return { success: false, error: 'Insufficient stock' };
   }
-  
-  run(
-    'UPDATE inventory SET stock_quantity = stock_quantity - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-    [quantity, id]
-  );
-  
+
+  const next = cur - quantity;
+  const ts = new Date().toISOString();
+  run('UPDATE inventory SET stock_quantity = ?, updated_at = ? WHERE id = ?', [next, ts, id]);
+
   return { success: true, item: getInventoryItemById(id) as InventoryItem };
 }
 
 // Delete inventory item (soft delete)
 export function deleteInventoryItem(id: number): boolean {
-  const result = run('UPDATE inventory SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
+  const ts = new Date().toISOString();
+  const result = run('UPDATE inventory SET is_active = ?, updated_at = ? WHERE id = ?', [0, ts, id]);
   return result.changes > 0;
 }
 
 // Get inventory statistics
 export function getInventoryStats() {
-  const totalItems = getOne('SELECT COUNT(*) as count FROM inventory WHERE is_active = 1') as { count: number };
-  const lowStock = getOne('SELECT COUNT(*) as count FROM inventory WHERE stock_quantity <= min_stock_level AND is_active = 1') as { count: number };
-  const totalValue = getOne('SELECT COALESCE(SUM(stock_quantity * cost_price), 0) as value FROM inventory WHERE is_active = 1') as { value: number };
-  
-  const categoryWise = query(
-    `SELECT category, COUNT(*) as count, COALESCE(SUM(stock_quantity * cost_price), 0) as value
-     FROM inventory 
-     WHERE is_active = 1 
-     GROUP BY category`
+  const rows = (listTable('inventory') as InventoryItem[]).filter((r) => isInventoryActive(r));
+  const totalItems = rows.length;
+  const lowStock = rows.filter(
+    (r) => (Number(r.stock_quantity) || 0) <= (Number(r.min_stock_level) || 0)
+  ).length;
+  const totalValue = rows.reduce(
+    (s, r) => s + (Number(r.stock_quantity) || 0) * (Number(r.cost_price) || 0),
+    0
   );
-  
+
+  const catMap = new Map<string, { count: number; value: number }>();
+  for (const r of rows) {
+    const c = String(r.category);
+    const prev = catMap.get(c) || { count: 0, value: 0 };
+    prev.count += 1;
+    prev.value += (Number(r.stock_quantity) || 0) * (Number(r.cost_price) || 0);
+    catMap.set(c, prev);
+  }
+  const categoryWise = Array.from(catMap.entries()).map(([category, v]) => ({
+    category,
+    count: v.count,
+    value: v.value,
+  }));
+
   return {
-    totalItems: totalItems.count,
-    lowStock: lowStock.count,
-    totalValue: totalValue.value,
+    totalItems,
+    lowStock,
+    totalValue,
     categoryWise,
   };
 }
 
 // Get items for pharmacy (medicines, supplements, food)
 export function getPharmacyItems(): InventoryItem[] {
-  return query(
-    "SELECT * FROM inventory WHERE category IN ('medicine', 'supplement', 'food') AND is_active = 1 AND stock_quantity > 0 ORDER BY name"
-  ) as InventoryItem[];
+  const allowed = new Set(['medicine', 'supplement', 'food']);
+  return (listTable('inventory') as InventoryItem[])
+    .filter(
+      (row) =>
+        isInventoryActive(row) &&
+        allowed.has(String(row.category)) &&
+        (Number(row.stock_quantity) || 0) > 0
+    )
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
 }
 
 // Check if item is low on stock

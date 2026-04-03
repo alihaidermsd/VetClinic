@@ -1,20 +1,97 @@
-import { query, getOne, run } from '../database';
+import { getOne, run, listTable } from '../database';
 import type { Token, TokenStatus, RoomQueueItem } from '@/types';
 
-// Get current date in YYYY-MM-DD format
-function getCurrentDate(): string {
+/** Calendar day in the clinic's browser timezone (YYYY-MM-DD). */
+export function getClinicDateString(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function utcDateString(): string {
   return new Date().toISOString().split('T')[0];
+}
+
+/** Token row counts as "today" if its date matches local clinic day OR UTC day (legacy data / timezone). */
+export function isTokenFromToday(token: { date?: string } | null | undefined): boolean {
+  if (token == null) return false;
+
+  const clinicToday = getClinicDateString();
+  const utcToday = utcDateString();
+
+  const raw = String(token.date ?? '').trim();
+  if (!raw) return false;
+
+  // If stored as ISO timestamp, remove time portion.
+  const beforeTime = raw.split('T')[0].split(' ')[0].trim();
+
+  // Normalize YYYYMMDD -> YYYY-MM-DD
+  if (/^\d{8}$/.test(beforeTime)) {
+    const y = beforeTime.slice(0, 4);
+    const m = beforeTime.slice(4, 6);
+    const d = beforeTime.slice(6, 8);
+    const ymd = `${y}-${m}-${d}`;
+    return ymd === clinicToday || ymd === utcToday;
+  }
+
+  // Normalize YYYY/M/D or YYYY-MM-D -> YYYY-MM-DD
+  const mdy = beforeTime.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+  if (mdy) {
+    const y = mdy[1];
+    const m = String(mdy[2]).padStart(2, '0');
+    const d = String(mdy[3]).padStart(2, '0');
+    const ymd = `${y}-${m}-${d}`;
+    return ymd === clinicToday || ymd === utcToday;
+  }
+
+  // If it looks like YYYY-MM-DD already
+  if (/^\d{4}-\d{2}-\d{2}$/.test(beforeTime)) {
+    return beforeTime === clinicToday || beforeTime === utcToday;
+  }
+
+  // Last resort: if it's epoch millis or any parseable date string, compare by local/UTC date parts.
+  if (/^\d+$/.test(raw)) {
+    const dt = new Date(Number(raw));
+    if (!Number.isNaN(dt.getTime())) {
+      const ymdLocal = getClinicDateStringFromDate(dt);
+      const ymdUtc = getUTCDateStringFromDate(dt);
+      return ymdLocal === clinicToday || ymdUtc === utcToday;
+    }
+  } else {
+    const dt = new Date(raw);
+    if (!Number.isNaN(dt.getTime())) {
+      const ymdLocal = getClinicDateStringFromDate(dt);
+      const ymdUtc = getUTCDateStringFromDate(dt);
+      return ymdLocal === clinicToday || ymdUtc === utcToday;
+    }
+  }
+
+  return false;
+}
+
+function getCurrentDate(): string {
+  return getClinicDateString();
+}
+
+function getClinicDateStringFromDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function getUTCDateStringFromDate(d: Date): string {
+  return d.toISOString().split('T')[0];
 }
 
 // Generate next token number for today
 export function generateTokenNumber(): number {
-  const today = getCurrentDate();
-  const lastToken = getOne(
-    'SELECT MAX(token_number) as last_number FROM tokens WHERE date = ?',
-    [today]
-  );
-  
-  return (lastToken?.last_number || 0) + 1;
+  const nums = (listTable('tokens') as Token[])
+    .filter((t) => isTokenFromToday(t))
+    .map((t) => Number(t.token_number) || 0);
+  return (nums.length ? Math.max(...nums) : 0) + 1;
 }
 
 // Generate bill code
@@ -33,19 +110,21 @@ export function generateBillCode(): string {
 export function createToken(patientId: number, animalId: number): Token {
   const tokenNumber = generateTokenNumber();
   const billCode = generateBillCode();
-  
+  const ts = new Date().toISOString();
+  const today = getCurrentDate();
+
   // First create the token
   const tokenResult = run(
-    'INSERT INTO tokens (token_number, bill_id, patient_id, animal_id, status, date) VALUES (?, 0, ?, ?, ?, ?)',
-    [tokenNumber, patientId, animalId, 'waiting', getCurrentDate()]
+    'INSERT INTO tokens (token_number, bill_id, patient_id, animal_id, status, date, created_at) VALUES (?, 0, ?, ?, ?, ?, ?)',
+    [tokenNumber, patientId, animalId, 'waiting', today, ts]
   );
-  
+
   const tokenId = tokenResult.lastInsertRowid;
-  
+
   // Then create the bill with the token ID
   const billResult = run(
-    'INSERT INTO bills (bill_code, patient_id, animal_id, token_id, total_amount, discount_amount, discount_percent, final_amount, paid_amount, payment_status, status) VALUES (?, ?, ?, ?, 0, 0, 0, 0, 0, ?, ?)',
-    [billCode, patientId, animalId, tokenId, 'pending', 'active']
+    'INSERT INTO bills (bill_code, patient_id, animal_id, token_id, total_amount, discount_amount, discount_percent, final_amount, paid_amount, payment_status, status, created_at, updated_at) VALUES (?, ?, ?, ?, 0, 0, 0, 0, 0, ?, ?, ?, ?)',
+    [billCode, patientId, animalId, tokenId, 'pending', 'active', ts, ts]
   );
   
   // Update token with bill_id
@@ -59,17 +138,52 @@ export function getTokenById(id: number): Token | null {
   return getOne('SELECT * FROM tokens WHERE id = ?', [id]) as Token | null;
 }
 
-// Get token by token number (today only)
+// Get token by token number (today only — local + UTC day, numeric-safe)
 export function getTokenByNumber(tokenNumber: number): Token | null {
-  return getOne('SELECT * FROM tokens WHERE token_number = ? AND date = ?', [tokenNumber, getCurrentDate()]) as Token | null;
+  const n = Number(tokenNumber);
+  const matches = (listTable('tokens') as Token[]).filter(
+    (t) => isTokenFromToday(t) && Number(t.token_number) === n
+  );
+  return matches[0] ?? null;
 }
 
-// Get today's tokens
+// Get today's tokens (in-memory DB — filter in JS)
 export function getTodayTokens(): Token[] {
-  return query(
-    'SELECT * FROM tokens WHERE date = ? ORDER BY token_number DESC',
-    [getCurrentDate()]
-  ) as Token[];
+  return (listTable('tokens') as Token[])
+    .filter((t) => isTokenFromToday(t))
+    .sort((a, b) => b.token_number - a.token_number);
+}
+
+export type TodayTokenDashboardRow = Token & { patient_name: string; animal_name: string };
+
+/** Today's tokens with owner and animal names for the dashboard table. */
+export function getTodayTokensForDashboard(): TodayTokenDashboardRow[] {
+  const tokens = getTodayTokens();
+  const patients = Object.fromEntries(
+    listTable('patients').map((p: { id: number; owner_name?: string }) => [p.id, p])
+  );
+  const animals = Object.fromEntries(
+    listTable('animals').map((a: { id: number; name?: string }) => [a.id, a])
+  );
+  return tokens.map((t) => ({
+    ...t,
+    patient_name: patients[t.patient_id]?.owner_name ?? '—',
+    animal_name: animals[t.animal_id]?.name ?? '—',
+  }));
+}
+
+export type ReceptionTokenRow = TodayTokenDashboardRow & { bill_code: string };
+
+/** Today's tokens with names and bill code — for reception list and printing. */
+export function getTodayTokensForReception(): ReceptionTokenRow[] {
+  const base = getTodayTokensForDashboard();
+  const billsById = Object.fromEntries(
+    listTable('bills').map((b: { id: number; bill_code: string }) => [b.id, b])
+  );
+  return base.map((t) => ({
+    ...t,
+    bill_code: billsById[t.bill_id]?.bill_code ?? '—',
+  }));
 }
 
 // Update token status
@@ -113,53 +227,71 @@ export function getTokenWithDetails(tokenId: number) {
 
 // Get room queue
 export function getRoomQueue(roomId: number): RoomQueueItem[] {
-  const today = getCurrentDate();
-  const items = query(
-    `SELECT 
-      t.id as token_id,
-      t.token_number,
-      t.bill_id,
-      p.owner_name as patient_name,
-      p.owner_phone,
-      a.name as animal_name,
-      a.type as animal_type,
-      t.status,
-      t.created_at as waiting_since
-    FROM tokens t
-    JOIN patients p ON t.patient_id = p.id
-    JOIN animals a ON t.animal_id = a.id
-    WHERE t.room_id = ? AND t.date = ? AND t.status IN ('waiting', 'in_progress')
-    ORDER BY t.token_number`,
-    [roomId, today]
+  const patients = Object.fromEntries(
+    listTable('patients').map((p: { id: number; owner_name?: string; owner_phone?: string }) => [
+      p.id,
+      p,
+    ])
   );
-  
-  return items as RoomQueueItem[];
+  const animals = Object.fromEntries(
+    listTable('animals').map((a: { id: number; name?: string; type?: string }) => [a.id, a])
+  );
+
+  return (listTable('tokens') as Token[])
+    .filter(
+      (t) =>
+        t.room_id === roomId &&
+        isTokenFromToday(t) &&
+        (t.status === 'waiting' || t.status === 'in_progress')
+    )
+    .sort((a, b) => a.token_number - b.token_number)
+    .map((t) => ({
+      token_id: t.id,
+      token_number: t.token_number,
+      bill_id: t.bill_id,
+      patient_name: patients[t.patient_id]?.owner_name ?? '—',
+      owner_phone: patients[t.patient_id]?.owner_phone ?? '—',
+      animal_name: animals[t.animal_id]?.name ?? '—',
+      animal_type: String(animals[t.animal_id]?.type ?? ''),
+      status: t.status,
+      waiting_since: t.created_at,
+    }));
 }
 
 // Get waiting tokens for a room type
 export function getWaitingTokensByRoomType(roomType: string): RoomQueueItem[] {
-  const today = getCurrentDate();
-  const items = query(
-    `SELECT 
-      t.id as token_id,
-      t.token_number,
-      t.bill_id,
-      p.owner_name as patient_name,
-      p.owner_phone,
-      a.name as animal_name,
-      a.type as animal_type,
-      t.status,
-      t.created_at as waiting_since
-    FROM tokens t
-    JOIN patients p ON t.patient_id = p.id
-    JOIN animals a ON t.animal_id = a.id
-    JOIN rooms r ON t.room_id = r.id
-    WHERE r.type = ? AND t.date = ? AND t.status IN ('waiting', 'in_progress')
-    ORDER BY t.token_number`,
-    [roomType, today]
+  const roomsById = Object.fromEntries(
+    listTable('rooms').map((r: { id: number; type: string }) => [r.id, r])
   );
-  
-  return items as RoomQueueItem[];
+  const patients = Object.fromEntries(
+    listTable('patients').map((p: { id: number; owner_name?: string; owner_phone?: string }) => [
+      p.id,
+      p,
+    ])
+  );
+  const animals = Object.fromEntries(
+    listTable('animals').map((a: { id: number; name?: string; type?: string }) => [a.id, a])
+  );
+
+  return (listTable('tokens') as Token[])
+    .filter((t) => {
+      if (!t.room_id || !isTokenFromToday(t)) return false;
+      if (t.status !== 'waiting' && t.status !== 'in_progress') return false;
+      const room = roomsById[t.room_id];
+      return room?.type === roomType;
+    })
+    .sort((a, b) => a.token_number - b.token_number)
+    .map((t) => ({
+      token_id: t.id,
+      token_number: t.token_number,
+      bill_id: t.bill_id,
+      patient_name: patients[t.patient_id]?.owner_name ?? '—',
+      owner_phone: patients[t.patient_id]?.owner_phone ?? '—',
+      animal_name: animals[t.animal_id]?.name ?? '—',
+      animal_type: String(animals[t.animal_id]?.type ?? ''),
+      status: t.status,
+      waiting_since: t.created_at,
+    }));
 }
 
 // Assign token to room
@@ -192,18 +324,12 @@ export function cancelToken(tokenId: number): Token | null {
 
 // Get token statistics for today
 export function getTodayTokenStats() {
-  const today = getCurrentDate();
-  
-  const total = getOne('SELECT COUNT(*) as count FROM tokens WHERE date = ?', [today]) as { count: number };
-  const waiting = getOne('SELECT COUNT(*) as count FROM tokens WHERE date = ? AND status = ?', [today, 'waiting']) as { count: number };
-  const inProgress = getOne('SELECT COUNT(*) as count FROM tokens WHERE date = ? AND status = ?', [today, 'in_progress']) as { count: number };
-  const completed = getOne('SELECT COUNT(*) as count FROM tokens WHERE date = ? AND status = ?', [today, 'completed']) as { count: number };
-  
+  const todayTokens = (listTable('tokens') as Token[]).filter((t) => isTokenFromToday(t));
   return {
-    total: total.count,
-    waiting: waiting.count,
-    inProgress: inProgress.count,
-    completed: completed.count,
+    total: todayTokens.length,
+    waiting: todayTokens.filter((t) => t.status === 'waiting').length,
+    inProgress: todayTokens.filter((t) => t.status === 'in_progress').length,
+    completed: todayTokens.filter((t) => t.status === 'completed').length,
   };
 }
 

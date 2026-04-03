@@ -3,17 +3,25 @@ import type { Patient, Animal, PatientFormData, PatientSearchResult } from '@/ty
 
 // Create new patient with animal
 export function createPatient(data: PatientFormData): { patient: Patient; animal: Animal } {
+  const ts = new Date().toISOString();
   // Create patient
   const patientResult = run(
-    'INSERT INTO patients (owner_name, owner_phone, owner_email, owner_address) VALUES (?, ?, ?, ?)',
-    [data.owner_name, data.owner_phone, data.owner_email || null, data.owner_address || null]
+    'INSERT INTO patients (owner_name, owner_phone, owner_email, owner_address, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+    [
+      data.owner_name,
+      data.owner_phone,
+      data.owner_email || null,
+      data.owner_address || null,
+      ts,
+      ts,
+    ]
   );
-  
+
   const patientId = patientResult.lastInsertRowid;
-  
+
   // Create animal
   const animalResult = run(
-    'INSERT INTO animals (patient_id, name, type, breed, age, age_unit, gender, weight, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO animals (patient_id, name, type, breed, age, age_unit, gender, weight, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       patientId,
       data.animal_name,
@@ -24,6 +32,7 @@ export function createPatient(data: PatientFormData): { patient: Patient; animal
       data.gender || null,
       data.weight || null,
       data.notes || null,
+      ts,
     ]
   );
   
@@ -31,6 +40,32 @@ export function createPatient(data: PatientFormData): { patient: Patient; animal
   const animal = getOne('SELECT * FROM animals WHERE id = ?', [animalResult.lastInsertRowid]) as Animal;
   
   return { patient, animal };
+}
+
+/** Minimal registration for reception: customer name + pet name; phone optional (use "—" if empty). */
+export function createWalkInPatient(
+  customerName: string,
+  petName: string,
+  phone?: string
+): { patient: Patient; animal: Animal } {
+  const trimmedOwner = customerName.trim();
+  const trimmedPet = petName.trim();
+  const ph = phone?.trim();
+  const data: PatientFormData = {
+    owner_name: trimmedOwner,
+    owner_phone: ph && ph.length > 0 ? ph : '—',
+    owner_email: '',
+    owner_address: '',
+    animal_name: trimmedPet,
+    animal_type: 'dog',
+    breed: '',
+    age: undefined,
+    age_unit: 'years',
+    gender: 'unknown',
+    weight: undefined,
+    notes: '',
+  };
+  return createPatient(data);
 }
 
 // Get patient by ID
