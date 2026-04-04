@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -11,7 +12,8 @@ import {
   ShoppingCart, 
   Minus,
   Trash2,
-  Package
+  Package,
+  Percent,
 } from 'lucide-react';
 import { getPharmacyItems, searchInventory, getInventoryItemById } from '@/lib/services/inventoryService';
 import {
@@ -19,10 +21,12 @@ import {
   searchBills,
   getBillWithDetails,
   addBillItem,
+  applyDiscount,
 } from '@/lib/services/billingService';
 import { getRoomsByType } from '@/lib/services/roomService';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
+import { billItemProviderLabel } from '@/lib/billItemDisplay';
 
 interface CartItem {
   inventory_id: number;
@@ -48,6 +52,7 @@ export function PharmacyModule() {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [pharmacyItems, setPharmacyItems] = useState<any[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [discountPercent, setDiscountPercent] = useState('');
 
   useEffect(() => {
     loadPharmacyItems();
@@ -93,7 +98,40 @@ export function PharmacyModule() {
     setCart([]);
     setSearchResults([]);
     setSearchTerm('');
+    const p = Number(details.bill?.discount_percent);
+    setDiscountPercent(Number.isFinite(p) && p > 0 ? String(p) : '');
     toast.success('Bill loaded for dispensing');
+  };
+
+  const handleApplyDiscount = () => {
+    if (!currentBill?.bill?.id) return;
+    const pct = parseFloat(discountPercent);
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+      toast.error('Enter a discount between 0 and 100');
+      return;
+    }
+    try {
+      applyDiscount(currentBill.bill.id, pct);
+      const updated = getBillWithDetails(currentBill.bill.id);
+      if (updated) setCurrentBill(updated);
+      toast.success(pct === 0 ? 'Discount removed from bill' : 'Discount updated on bill');
+      setDiscountPercent(pct === 0 ? '' : String(pct));
+    } catch {
+      toast.error('Could not apply discount');
+    }
+  };
+
+  const handleRemoveBillDiscount = () => {
+    if (!currentBill?.bill?.id) return;
+    try {
+      applyDiscount(currentBill.bill.id, 0);
+      const updated = getBillWithDetails(currentBill.bill.id);
+      if (updated) setCurrentBill(updated);
+      setDiscountPercent('');
+      toast.success('Discount removed from bill');
+    } catch {
+      toast.error('Could not remove discount');
+    }
   };
 
   const handleSearchItems = () => {
@@ -299,10 +337,51 @@ export function PharmacyModule() {
                             setCart([]);
                             setSearchResults([]);
                             setSearchTerm('');
+                            setDiscountPercent('');
                           }}
                         >
                           Change
                         </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-amber-100 bg-amber-50/50">
+                    <CardContent className="p-4">
+                      <div className="flex flex-col gap-3">
+                        <div>
+                          <Label htmlFor="ph-discount" className="flex items-center gap-2 text-slate-800">
+                            <Percent className="w-4 h-4" />
+                            Bill discount (%)
+                          </Label>
+                          <p className="text-xs text-slate-600 mt-1">
+                            Percentage off the whole bill (medicines, food, and any other charges). Update or remove if
+                            the customer asks.
+                          </p>
+                        </div>
+                        <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-end gap-2">
+                          <Input
+                            id="ph-discount"
+                            type="number"
+                            min={0}
+                            max={100}
+                            step={0.5}
+                            placeholder="e.g. 10"
+                            value={discountPercent}
+                            onChange={(e) => setDiscountPercent(e.target.value)}
+                            className="max-w-[10rem] bg-white"
+                          />
+                          <div className="flex flex-wrap gap-2">
+                            <Button type="button" variant="secondary" onClick={handleApplyDiscount}>
+                              {Number(currentBill.bill?.discount_percent) > 0 ? 'Update discount' : 'Apply discount'}
+                            </Button>
+                            {Number(currentBill.bill?.discount_percent) > 0 && (
+                              <Button type="button" variant="outline" onClick={handleRemoveBillDiscount}>
+                                Remove discount
+                              </Button>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </CardContent>
                   </Card>
@@ -319,7 +398,7 @@ export function PharmacyModule() {
                       <CardContent>
                         <div className="flex gap-2 mb-4">
                           <Input
-                            placeholder="Search medicines..."
+                            placeholder="Search medicines or food..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                             onKeyPress={(e) => e.key === 'Enter' && handleSearchItems()}
@@ -456,7 +535,7 @@ export function PharmacyModule() {
                           <thead className="border-b border-slate-200">
                             <tr>
                               <th className="text-left py-2 font-medium text-slate-600">Item</th>
-                              <th className="text-left py-2 font-medium text-slate-600">Room</th>
+                              <th className="text-left py-2 font-medium text-slate-600">Provider</th>
                               <th className="text-right py-2 font-medium text-slate-600">Qty</th>
                               <th className="text-right py-2 font-medium text-slate-600">Price</th>
                               <th className="text-right py-2 font-medium text-slate-600">Total</th>
@@ -467,7 +546,7 @@ export function PharmacyModule() {
                               currentBill.items.map((item: any) => (
                                 <tr key={item.id} className="border-b border-slate-100">
                                   <td className="py-2">{item.item_name}</td>
-                                  <td className="py-2 text-slate-500">{item.room_name}</td>
+                                  <td className="py-2 text-slate-500">{billItemProviderLabel(item)}</td>
                                   <td className="py-2 text-right">{item.quantity}</td>
                                   <td className="py-2 text-right">₹{formatRupee(item.unit_price)}</td>
                                   <td className="py-2 text-right">₹{formatRupee(item.total_price)}</td>
@@ -497,7 +576,7 @@ export function PharmacyModule() {
                           </div>
                           {Number(currentBill.bill?.discount_amount) > 0 && (
                             <div className="flex justify-between text-emerald-700">
-                              <span>Discount:</span>
+                              <span>Discount ({currentBill.bill?.discount_percent}%):</span>
                               <span>-₹{formatRupee(currentBill.bill?.discount_amount)}</span>
                             </div>
                           )}

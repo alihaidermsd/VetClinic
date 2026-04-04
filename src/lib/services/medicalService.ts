@@ -22,6 +22,7 @@ export function saveMedicalRecordForBill(
       follow_up_date: data.follow_up_date,
     });
     if (updated) return updated;
+    throw new Error('Failed to update medical record');
   }
   return createMedicalRecord(data);
 }
@@ -29,10 +30,9 @@ export function saveMedicalRecordForBill(
 // Create medical record
 export function createMedicalRecord(data: Omit<MedicalRecord, 'id' | 'created_at'>): MedicalRecord {
   const ts = new Date().toISOString();
+  // Single-line INSERT so paramsToObject maps columns to params reliably.
   const result = run(
-    `INSERT INTO medical_records 
-     (bill_id, patient_id, animal_id, doctor_id, doctor_name, room_id, diagnosis, symptoms, treatment, notes, follow_up_date, created_at) 
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    'INSERT INTO medical_records (bill_id, patient_id, animal_id, doctor_id, doctor_name, room_id, diagnosis, symptoms, treatment, notes, follow_up_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       data.bill_id,
       data.patient_id,
@@ -60,7 +60,7 @@ export function getMedicalRecordById(id: number): MedicalRecord | null {
 // Get medical records by bill ID
 export function getMedicalRecordsByBillId(billId: number): MedicalRecord[] {
   return query(
-    'SELECT * FROM medical_records WHERE bill_id = ? ORDER BY created_at DESC',
+    'SELECT * FROM medical_records WHERE bill_id = ? ORDER BY id DESC',
     [billId]
   ) as MedicalRecord[];
 }

@@ -1,5 +1,12 @@
 import { query, getOne, run } from '../database';
-import type { Patient, Animal, PatientFormData, PatientSearchResult } from '@/types';
+import type { Patient, Animal, PatientFormData, PatientSearchResult, AnimalType } from '@/types';
+
+export type WalkInPatientOpts = {
+  phone?: string;
+  animalType?: AnimalType;
+  /** When animalType is `other`, stored in notes and used on token slip */
+  customSpecies?: string;
+};
 
 // Create new patient with animal
 export function createPatient(data: PatientFormData): { patient: Patient; animal: Animal } {
@@ -46,24 +53,31 @@ export function createPatient(data: PatientFormData): { patient: Patient; animal
 export function createWalkInPatient(
   customerName: string,
   petName: string,
-  phone?: string
+  opts?: WalkInPatientOpts
 ): { patient: Patient; animal: Animal } {
   const trimmedOwner = customerName.trim();
   const trimmedPet = petName.trim();
-  const ph = phone?.trim();
+  const ph = opts?.phone?.trim();
+  const animalType = opts?.animalType ?? 'dog';
+  const custom = opts?.customSpecies?.trim() ?? '';
+  const notes =
+    animalType === 'other' && custom.length > 0
+      ? `Species: ${custom}`
+      : '';
+
   const data: PatientFormData = {
     owner_name: trimmedOwner,
     owner_phone: ph && ph.length > 0 ? ph : '—',
     owner_email: '',
     owner_address: '',
     animal_name: trimmedPet,
-    animal_type: 'dog',
+    animal_type: animalType,
     breed: '',
     age: undefined,
     age_unit: 'years',
     gender: 'unknown',
     weight: undefined,
-    notes: '',
+    notes,
   };
   return createPatient(data);
 }

@@ -1,5 +1,12 @@
 import { listTable } from '../database';
-import type { DailyReport, RoomWiseReport, PaymentWiseReport, DoctorReport, PaymentMethod } from '@/types';
+import type {
+  DailyReport,
+  RoomWiseReport,
+  PaymentWiseReport,
+  DoctorReport,
+  PaymentMethod,
+  BillReportRow,
+} from '@/types';
 import { getClinicDateString, isTokenFromToday } from './tokenService';
 
 function datePart(iso: string | undefined | null): string | null {
@@ -14,6 +21,18 @@ function isDashboardCalendarDay(iso: string | undefined | null, clinicToday: str
 
 function normalizeStatus(s: unknown): string {
   return String(s ?? '').trim().toLowerCase();
+}
+
+/**
+ * Bills that should appear in revenue reports: completed, or fully paid (even if staff has not
+ * pressed "Complete bill" yet). Cancelled bills are excluded.
+ */
+function isReportableClosedBill(b: { status?: unknown; payment_status?: unknown } | null | undefined): boolean {
+  if (!b) return false;
+  if (normalizeStatus(b.status) === 'cancelled') return false;
+  const st = normalizeStatus(b.status);
+  const pay = normalizeStatus(b.payment_status);
+  return st === 'completed' || pay === 'paid';
 }
 
 function getYmdParts(value: unknown): { local: string; utc: string } | null {
@@ -39,6 +58,17 @@ function getYmdParts(value: unknown): { local: string; utc: string } | null {
     return { local, utc };
   }
 
+  // "YYYY-MM-DD HH:MM:SS" (legacy SQL) — normalize so Date() parses reliably
+  const sqlDt = raw.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/);
+  if (sqlDt) {
+    const d = new Date(`${sqlDt[1]}T${sqlDt[2]}`);
+    if (!Number.isNaN(d.getTime())) {
+      const local = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const utc = d.toISOString().split('T')[0];
+      return { local, utc };
+    }
+  }
+
   const d = new Date(raw);
   if (Number.isNaN(d.getTime())) return null;
 
@@ -47,19 +77,69 @@ function getYmdParts(value: unknown): { local: string; utc: string } | null {
   return { local, utc };
 }
 
-function isIsoOnDay(value: unknown, targetDay: string): boolean {
-  const parts = getYmdParts(value);
+/** Date used for revenue reporting: completion time when set, otherwise bill creation. */
+function billAccountingParts(b: any): { local: string; utc: string } | null {
+  const ts = b.completed_at || b.created_at;
+  return getYmdParts(ts);
+}
+
+function isCompletedBillOnDay(b: any, targetDay: string): boolean {
+  if (!isReportableClosedBill(b)) return false;
+  const parts = billAccountingParts(b);
   if (!parts) return false;
   return parts.local === targetDay || parts.utc === targetDay;
 }
 
-function isIsoWithinRange(value: unknown, startDate: string, endDate: string): boolean {
-  const parts = getYmdParts(value);
+function isCompletedBillInRange(b: any, startDate: string, endDate: string): boolean {
+  if (!isReportableClosedBill(b)) return false;
+  const parts = billAccountingParts(b);
   if (!parts) return false;
-  const { local, utc } = parts;
-  const localOk = local >= startDate && local <= endDate;
-  const utcOk = utc >= startDate && utc <= endDate;
+  const localOk = parts.local >= startDate && parts.local <= endDate;
+  const utcOk = parts.utc >= startDate && parts.utc <= endDate;
   return localOk || utcOk;
+}
+
+function aggregatePaymentsForBillSet(billIds: Set<number>): PaymentWiseReport[] {
+  const payments = (listTable('payments') as any[]).filter((p) => billIds.has(p.bill_id));
+  const m = new Map<string, { total_amount: number; count: number }>();
+  for (const p of payments) {
+    const method = String(p.payment_method || 'cash');
+    const cur = m.get(method) || { total_amount: 0, count: 0 };
+    cur.total_amount += Number(p.amount) || 0;
+    cur.count += 1;
+    m.set(method, cur);
+  }
+  return Array.from(m.entries()).map(([payment_method, v]) => ({
+    payment_method: payment_method as PaymentMethod,
+    total_amount: v.total_amount,
+    count: v.count,
+  }));
+}
+
+function enrichBillReportRows(bills: any[]): BillReportRow[] {
+  const patients = Object.fromEntries(listTable('patients').map((p: any) => [p.id, p]));
+  const animals = Object.fromEntries(listTable('animals').map((a: any) => [a.id, a]));
+  return bills
+    .slice()
+    .sort((a, b) =>
+      String(b.completed_at || b.created_at || '').localeCompare(String(a.completed_at || a.created_at || ''))
+    )
+    .map(
+      (b): BillReportRow => ({
+        id: b.id,
+        bill_code: String(b.bill_code ?? ''),
+        created_at: String(b.created_at ?? ''),
+        completed_at: b.completed_at ? String(b.completed_at) : undefined,
+        total_amount: Number(b.total_amount) || 0,
+        discount_amount: Number(b.discount_amount) || 0,
+        final_amount: Number(b.final_amount) || 0,
+        paid_amount: Number(b.paid_amount) || 0,
+        payment_status: String(b.payment_status ?? ''),
+        payment_method: b.payment_method ? String(b.payment_method) : undefined,
+        owner_name: String(patients[b.patient_id]?.owner_name ?? '—'),
+        animal_name: String(animals[b.animal_id]?.name ?? '—'),
+      })
+    );
 }
 
 /** Collections today (payments), else completed bill totals finished today — matches clinic or UTC calendar day. */
@@ -76,7 +156,8 @@ function computeTodayRevenue(
   return bills
     .filter(
       (b) =>
-        b.status === 'completed' && isDashboardCalendarDay(b.completed_at, clinicToday, utcToday)
+        isReportableClosedBill(b) &&
+        isDashboardCalendarDay(b.completed_at || b.created_at, clinicToday, utcToday)
     )
     .reduce((s, b) => s + (Number(b.final_amount) || 0), 0);
 }
@@ -163,49 +244,11 @@ function aggregateRoomWise(billIds: Set<number>): RoomWiseReport[] {
   return Array.from(roomMap.values());
 }
 
-function aggregatePaymentsByDay(day: string): PaymentWiseReport[] {
-  const payments = (listTable('payments') as any[]).filter((p) => isIsoOnDay(p.created_at, day));
-  const m = new Map<string, { total_amount: number; count: number }>();
-  for (const p of payments) {
-    const method = String(p.payment_method || 'cash');
-    const cur = m.get(method) || { total_amount: 0, count: 0 };
-    cur.total_amount += Number(p.amount) || 0;
-    cur.count += 1;
-    m.set(method, cur);
-  }
-  return Array.from(m.entries()).map(([payment_method, v]) => ({
-    payment_method: payment_method as PaymentMethod,
-    total_amount: v.total_amount,
-    count: v.count,
-  }));
-}
-
-function aggregatePaymentsInRange(startDate: string, endDate: string): PaymentWiseReport[] {
-  const payments = (listTable('payments') as any[]).filter((p) => {
-    return isIsoWithinRange(p.created_at, startDate, endDate);
-  });
-  const m = new Map<string, { total_amount: number; count: number }>();
-  for (const p of payments) {
-    const method = String(p.payment_method || 'cash');
-    const cur = m.get(method) || { total_amount: 0, count: 0 };
-    cur.total_amount += Number(p.amount) || 0;
-    cur.count += 1;
-    m.set(method, cur);
-  }
-  return Array.from(m.entries()).map(([payment_method, v]) => ({
-    payment_method: payment_method as PaymentMethod,
-    total_amount: v.total_amount,
-    count: v.count,
-  }));
-}
-
-// Get daily report (completed bills by bill created_at date — in-memory safe)
+// Get daily report (completed bills attributed to calendar day of completion, else creation)
 export function getDailyReport(date?: string): DailyReport {
   const targetDate = date || getClinicDateString();
   const bills = listTable('bills') as any[];
-  const completed = bills.filter(
-    (b) => normalizeStatus(b.status) === 'completed' && isIsoOnDay(b.created_at, targetDate)
-  );
+  const completed = bills.filter((b) => isCompletedBillOnDay(b, targetDate));
 
   const total_bills = completed.length;
   const total_revenue = completed.reduce((s, b) => s + (Number(b.total_amount) || 0), 0);
@@ -214,7 +257,7 @@ export function getDailyReport(date?: string): DailyReport {
 
   const billIds = new Set(completed.map((b) => b.id));
   const room_wise = aggregateRoomWise(billIds);
-  const payment_wise = aggregatePaymentsByDay(targetDate);
+  const payment_wise = aggregatePaymentsForBillSet(billIds);
 
   return {
     date: targetDate,
@@ -230,10 +273,7 @@ export function getDailyReport(date?: string): DailyReport {
 // Get date range report
 export function getDateRangeReport(startDate: string, endDate: string) {
   const bills = listTable('bills') as any[];
-  const completed = bills.filter((b) => {
-    if (normalizeStatus(b.status) !== 'completed') return false;
-    return isIsoWithinRange(b.created_at, startDate, endDate);
-  });
+  const completed = bills.filter((b) => isCompletedBillInRange(b, startDate, endDate));
 
   const summary = {
     total_bills: completed.length,
@@ -244,12 +284,12 @@ export function getDateRangeReport(startDate: string, endDate: string) {
 
   const byDay = new Map<string, { bill_count: number; revenue: number }>();
   for (const b of completed) {
-    const parts = getYmdParts(b.created_at);
+    const parts = billAccountingParts(b);
     if (!parts) continue;
-    // Prefer local day if it fits range; otherwise use UTC day.
-    const key =
-      parts.local >= startDate && parts.local <= endDate ? parts.local : parts.utc;
-    const d = key;
+    let d: string | null = null;
+    if (parts.local >= startDate && parts.local <= endDate) d = parts.local;
+    else if (parts.utc >= startDate && parts.utc <= endDate) d = parts.utc;
+    if (!d) continue;
     const cur = byDay.get(d) || { bill_count: 0, revenue: 0 };
     cur.bill_count += 1;
     cur.revenue += Number(b.final_amount) || 0;
@@ -261,7 +301,7 @@ export function getDateRangeReport(startDate: string, endDate: string) {
 
   const billIds = new Set(completed.map((b) => b.id));
   const room_wise = aggregateRoomWise(billIds);
-  const payment_wise = aggregatePaymentsInRange(startDate, endDate);
+  const payment_wise = aggregatePaymentsForBillSet(billIds);
 
   return {
     start_date: startDate,
@@ -273,6 +313,40 @@ export function getDateRangeReport(startDate: string, endDate: string) {
   };
 }
 
+export function getBillLedgerForDay(date: string): BillReportRow[] {
+  const bills = listTable('bills') as any[];
+  const completed = bills.filter((b) => isCompletedBillOnDay(b, date));
+  return enrichBillReportRows(completed);
+}
+
+export function getBillLedgerForRange(startDate: string, endDate: string): BillReportRow[] {
+  const bills = listTable('bills') as any[];
+  const completed = bills.filter((b) => isCompletedBillInRange(b, startDate, endDate));
+  return enrichBillReportRows(completed);
+}
+
+export function getAllTimeCompletedSummary() {
+  const bills = (listTable('bills') as any[]).filter((b) => isReportableClosedBill(b));
+  const billIds = new Set(bills.map((b) => b.id));
+  const payments = (listTable('payments') as any[]).filter((p) => billIds.has(p.bill_id));
+  const total_payments_recorded = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  return {
+    total_bills: bills.length,
+    total_revenue: bills.reduce((s, b) => s + (Number(b.total_amount) || 0), 0),
+    total_discount: bills.reduce((s, b) => s + (Number(b.discount_amount) || 0), 0),
+    net_revenue: bills.reduce((s, b) => s + (Number(b.final_amount) || 0), 0),
+    total_payments_recorded,
+  };
+}
+
+/** From first of current month through today (clinic calendar). */
+export function getMonthToDateReport() {
+  const today = getClinicDateString();
+  const [y, m] = today.split('-').map(Number);
+  const start = `${y}-${String(m).padStart(2, '0')}-01`;
+  return getDateRangeReport(start, today);
+}
+
 // Get doctor-wise report (consultation line items on completed bills)
 export function getDoctorReport(startDate?: string, endDate?: string): DoctorReport[] {
   const bills = listTable('bills') as any[];
@@ -281,10 +355,10 @@ export function getDoctorReport(startDate?: string, endDate?: string): DoctorRep
 
   function billMatches(b: any): boolean {
     if (!b) return false;
-    if (normalizeStatus(b.status) !== 'completed') return false;
+    if (!isReportableClosedBill(b)) return false;
     if (!startDate && !endDate) return true;
-    if (startDate && endDate) return isIsoWithinRange(b.created_at, startDate, endDate);
-    if (startDate && !endDate) return isIsoOnDay(b.created_at, startDate);
+    if (startDate && endDate) return isCompletedBillInRange(b, startDate, endDate);
+    if (startDate && !endDate) return isCompletedBillOnDay(b, startDate);
     return true;
   }
 
@@ -330,10 +404,10 @@ export function getMedicineSalesReport(startDate?: string, endDate?: string) {
 
   function billMatches(b: any): boolean {
     if (!b) return false;
-    if (normalizeStatus(b.status) !== 'completed') return false;
+    if (!isReportableClosedBill(b)) return false;
     if (!startDate && !endDate) return true;
-    if (startDate && endDate) return isIsoWithinRange(b.created_at, startDate, endDate);
-    if (startDate && !endDate) return isIsoOnDay(b.created_at, startDate);
+    if (startDate && endDate) return isCompletedBillInRange(b, startDate, endDate);
+    if (startDate && !endDate) return isCompletedBillOnDay(b, startDate);
     return true;
   }
 
