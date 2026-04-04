@@ -49,7 +49,7 @@ export function printTokenSlip(opts: {
   </style>
 </head>
 <body>
-  <div class="brand">VetClinic Pro</div>
+  <div class="brand">Animal Care Hospital</div>
   <div class="sub">Queue token — please wait for your number</div>
   <div class="token-box">
     <div class="token-label">Your token</div>

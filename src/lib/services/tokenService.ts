@@ -1,5 +1,5 @@
 import { getOne, run, listTable } from '../database';
-import type { Token, TokenStatus, RoomQueueItem } from '@/types';
+import type { Token, TokenStatus, RoomQueueItem, TokenReferral } from '@/types';
 
 /** Calendar day in the clinic's browser timezone (YYYY-MM-DD). */
 export function getClinicDateString(): string {
@@ -225,6 +225,147 @@ export function getTokenWithDetails(tokenId: number) {
   };
 }
 
+// ——— Multi-room referrals (token_referrals) ———
+
+export function listReferralsForToken(tokenId: number): TokenReferral[] {
+  return (listTable('token_referrals') as TokenReferral[])
+    .filter((r) => Number(r.token_id) === Number(tokenId))
+    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+}
+
+function getActiveReferralsForToken(tokenId: number): TokenReferral[] {
+  return listReferralsForToken(tokenId).filter(
+    (r) => r.status === 'pending' || r.status === 'in_progress'
+  );
+}
+
+export function hasPendingReferralToRoom(tokenId: number, roomId: number): boolean {
+  return listReferralsForToken(tokenId).some(
+    (r) =>
+      Number(r.room_id) === Number(roomId) &&
+      (r.status === 'pending' || r.status === 'in_progress')
+  );
+}
+
+function getFirstDoctorRoomId(): number | null {
+  const rooms = listTable('rooms') as { id: number; type: string; is_active?: boolean | number }[];
+  const d = rooms.find(
+    (r) => String(r.type) === 'doctor_room' && (r.is_active === 1 || r.is_active === true)
+  );
+  return d ? Number(d.id) : null;
+}
+
+function cancelOpenReferralsForToken(tokenId: number): void {
+  for (const r of getActiveReferralsForToken(tokenId)) {
+    run('UPDATE token_referrals SET status = ? WHERE id = ?', ['cancelled', r.id]);
+  }
+}
+
+/** Doctor sends patient to one or more rooms at once. Queues use referrals when there are multiple stops. */
+export function referPatientToRooms(tokenId: number, roomIds: number[]): void {
+  const token = getTokenById(tokenId);
+  if (!token) return;
+
+  const unique = [...new Set(roomIds.map(Number))].filter((id) => Number.isFinite(id) && id > 0);
+  if (unique.length === 0) return;
+
+  const ts = new Date().toISOString();
+  for (const roomId of unique) {
+    const exists = (listTable('token_referrals') as TokenReferral[]).some(
+      (r) =>
+        Number(r.token_id) === tokenId &&
+        Number(r.room_id) === roomId &&
+        (r.status === 'pending' || r.status === 'in_progress')
+    );
+    if (!exists) {
+      run('INSERT INTO token_referrals (token_id, room_id, status, created_at) VALUES (?, ?, ?, ?)', [
+        tokenId,
+        roomId,
+        'pending',
+        ts,
+      ]);
+    }
+  }
+
+  const activeRoomIds = [
+    ...new Set(getActiveReferralsForToken(tokenId).map((r) => Number(r.room_id))),
+  ];
+
+  if (activeRoomIds.length === 1) {
+    assignTokenToRoom(tokenId, activeRoomIds[0]);
+  } else if (activeRoomIds.length > 1) {
+    run('UPDATE tokens SET room_id = ?, status = ? WHERE id = ?', [null, 'waiting', tokenId]);
+    const t2 = getTokenById(tokenId);
+    if (t2) {
+      run('UPDATE bills SET current_room_id = ? WHERE id = ?', [null, t2.bill_id]);
+    }
+  }
+}
+
+/** Lab / X-ray / surgery: start visit when patient was only on the referral list (no physical room yet). */
+export function activateReferralAtRoom(tokenId: number, roomId: number): Token | null {
+  const pending = (listTable('token_referrals') as TokenReferral[]).find(
+    (r) =>
+      Number(r.token_id) === tokenId &&
+      Number(r.room_id) === roomId &&
+      r.status === 'pending'
+  );
+  if (pending) {
+    run('UPDATE token_referrals SET status = ? WHERE id = ?', ['in_progress', pending.id]);
+  }
+  assignTokenToRoom(tokenId, roomId);
+  return updateTokenStatus(tokenId, 'in_progress');
+}
+
+/**
+ * Operator room finished this step. If other referrals remain, patient goes to waiting (no room).
+ * If none remain, patient returns to doctor room as waiting. Legacy tokens (no rows) still use completeToken.
+ */
+export function completeOperatorRoomVisit(tokenId: number, roomId: number): {
+  legacyCompleted: boolean;
+  moreReferralsPending: boolean;
+  returnedToDoctor: boolean;
+} {
+  const refs = listReferralsForToken(tokenId);
+  if (refs.length === 0) {
+    completeToken(tokenId);
+    return { legacyCompleted: true, moreReferralsPending: false, returnedToDoctor: false };
+  }
+
+  const match = refs.find(
+    (r) =>
+      Number(r.room_id) === Number(roomId) &&
+      (r.status === 'pending' || r.status === 'in_progress')
+  );
+  if (match) {
+    run('UPDATE token_referrals SET status = ? WHERE id = ?', ['completed', match.id]);
+  }
+
+  const token = getTokenById(tokenId);
+  if (!token) {
+    return { legacyCompleted: false, moreReferralsPending: false, returnedToDoctor: false };
+  }
+
+  const still = getActiveReferralsForToken(tokenId);
+  const doctorRoomId = getFirstDoctorRoomId();
+
+  if (still.length > 0) {
+    run('UPDATE tokens SET room_id = ? WHERE id = ?', [null, tokenId]);
+    run('UPDATE bills SET current_room_id = ? WHERE id = ?', [null, token.bill_id]);
+    run('UPDATE tokens SET status = ? WHERE id = ?', ['waiting', tokenId]);
+    return { legacyCompleted: false, moreReferralsPending: true, returnedToDoctor: false };
+  }
+
+  if (doctorRoomId != null) {
+    assignTokenToRoom(tokenId, doctorRoomId);
+  } else {
+    run('UPDATE tokens SET room_id = ? WHERE id = ?', [null, tokenId]);
+    run('UPDATE bills SET current_room_id = ? WHERE id = ?', [null, token.bill_id]);
+    run('UPDATE tokens SET status = ? WHERE id = ?', ['waiting', tokenId]);
+  }
+  return { legacyCompleted: false, moreReferralsPending: false, returnedToDoctor: true };
+}
+
 // Get room queue
 export function getRoomQueue(roomId: number): RoomQueueItem[] {
   const patients = Object.fromEntries(
@@ -258,11 +399,12 @@ export function getRoomQueue(roomId: number): RoomQueueItem[] {
     }));
 }
 
-// Get waiting tokens for a room type
+// Get waiting tokens for a room type (physical room_id and/or multi-room referrals)
 export function getWaitingTokensByRoomType(roomType: string): RoomQueueItem[] {
-  const roomsById = Object.fromEntries(
-    listTable('rooms').map((r: { id: number; type: string }) => [r.id, r])
-  );
+  const rooms = listTable('rooms') as { id: number; type: string }[];
+  const roomsById = Object.fromEntries(rooms.map((r) => [r.id, r]));
+  const typeRoomIds = new Set(rooms.filter((r) => r.type === roomType).map((r) => Number(r.id)));
+
   const patients = Object.fromEntries(
     listTable('patients').map((p: { id: number; owner_name?: string; owner_phone?: string }) => [
       p.id,
@@ -273,13 +415,46 @@ export function getWaitingTokensByRoomType(roomType: string): RoomQueueItem[] {
     listTable('animals').map((a: { id: number; name?: string; type?: string }) => [a.id, a])
   );
 
-  return (listTable('tokens') as Token[])
-    .filter((t) => {
-      if (!t.room_id || !isTokenFromToday(t)) return false;
-      if (t.status !== 'waiting' && t.status !== 'in_progress') return false;
-      const room = roomsById[t.room_id];
-      return room?.type === roomType;
-    })
+  const tokens = (listTable('tokens') as Token[]).filter(
+    (t) => isTokenFromToday(t) && (t.status === 'waiting' || t.status === 'in_progress')
+  );
+  const referrals = listTable('token_referrals') as TokenReferral[];
+
+  const seen = new Set<number>();
+  const matched: Token[] = [];
+
+  for (const t of tokens) {
+    let include = false;
+
+    if (t.room_id != null && typeRoomIds.has(Number(t.room_id))) {
+      const room = roomsById[t.room_id as keyof typeof roomsById];
+      if (room?.type === roomType) {
+        include = true;
+      }
+    }
+
+    // Referral rows: include pending/in_progress referrals even when the token is still
+    // in_progress at the doctor (or between multi-stop destinations). Physical room_id match
+    // above already covers "being seen here" without duplicating.
+    if (!include) {
+      for (const ref of referrals) {
+        if (Number(ref.token_id) !== t.id) continue;
+        if (ref.status !== 'pending' && ref.status !== 'in_progress') continue;
+        const rid = Number(ref.room_id);
+        if (typeRoomIds.has(rid) && roomsById[rid as keyof typeof roomsById]?.type === roomType) {
+          include = true;
+          break;
+        }
+      }
+    }
+
+    if (include && !seen.has(t.id)) {
+      seen.add(t.id);
+      matched.push(t);
+    }
+  }
+
+  return matched
     .sort((a, b) => a.token_number - b.token_number)
     .map((t) => ({
       token_id: t.id,
@@ -314,11 +489,13 @@ export function startToken(tokenId: number): Token | null {
 
 // Complete token
 export function completeToken(tokenId: number): Token | null {
+  cancelOpenReferralsForToken(tokenId);
   return updateTokenStatus(tokenId, 'completed');
 }
 
 // Cancel token
 export function cancelToken(tokenId: number): Token | null {
+  cancelOpenReferralsForToken(tokenId);
   return updateTokenStatus(tokenId, 'cancelled');
 }
 

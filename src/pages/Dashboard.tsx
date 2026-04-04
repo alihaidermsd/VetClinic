@@ -12,6 +12,9 @@ import {
   Stethoscope,
   UserCircle,
   Package,
+  FlaskConical,
+  Scan,
+  Scissors,
 } from 'lucide-react';
 import { ReceptionModule } from '@/modules/ReceptionModule';
 import { DoctorModule } from '@/modules/DoctorModule';
@@ -20,16 +23,32 @@ import { PharmacyModule } from '@/modules/PharmacyModule';
 import { InventoryModule } from '@/modules/InventoryModule';
 import { ReportsModule } from '@/modules/ReportsModule';
 import { AdminModule } from '@/modules/AdminModule';
+import { LabModule, XRayModule, SurgeryModule } from '@/modules/RoomOperatorModule';
 import { DashboardHome } from '@/modules/DashboardHome';
+import { RoleDashboardHome, type RoleDashboardLink } from '@/modules/RoleDashboardHome';
 import { getDashboardStats } from '@/lib/services/reportService';
 import { toast } from 'sonner';
 
-type ModuleType = 'dashboard' | 'reception' | 'doctor' | 'billing' | 'pharmacy' | 'inventory' | 'reports' | 'admin';
+type ModuleType =
+  | 'dashboard'
+  | 'reception'
+  | 'doctor'
+  | 'lab'
+  | 'xray'
+  | 'surgery'
+  | 'billing'
+  | 'pharmacy'
+  | 'inventory'
+  | 'reports'
+  | 'admin';
 
 const MODULE_IDS: ModuleType[] = [
   'dashboard',
   'reception',
   'doctor',
+  'lab',
+  'xray',
+  'surgery',
   'billing',
   'pharmacy',
   'inventory',
@@ -60,6 +79,9 @@ const MODULE_NAV_ITEMS: NavItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'reception', access: 'all' },
   { id: 'reception', label: 'Reception', icon: Users, permission: 'reception', access: 'permission' },
   { id: 'doctor', label: 'Doctor Room', icon: Stethoscope, permission: 'doctor_room', access: 'permission' },
+  { id: 'lab', label: 'Laboratory', icon: FlaskConical, permission: 'lab', access: 'permission' },
+  { id: 'xray', label: 'X-Ray Room', icon: Scan, permission: 'xray', access: 'permission' },
+  { id: 'surgery', label: 'Surgery Room', icon: Scissors, permission: 'surgery', access: 'permission' },
   { id: 'billing', label: 'Billing', icon: CreditCard, permission: 'billing', access: 'permission' },
   { id: 'pharmacy', label: 'Pharmacy', icon: Pill, permission: 'pharmacy', access: 'permission' },
   { id: 'inventory', label: 'Inventory', icon: Package, permission: 'inventory', access: 'permission' },
@@ -89,11 +111,33 @@ function navItemHasAccess(
   );
 }
 
+/** Full front-desk dashboard — Reception only. Other roles get a personalized activity dashboard. */
+function showExecutiveDashboard(role: string | undefined): boolean {
+  return role === 'reception';
+}
+
+function getRoleLabel(role: string) {
+  const labels: Record<string, string> = {
+    admin: 'Administrator',
+    reception: 'Receptionist',
+    doctor: 'Doctor',
+    lab_operator: 'Lab Operator',
+    xray_operator: 'X-Ray Operator',
+    surgery_operator: 'Surgery Operator',
+    pharmacy: 'Pharmacist',
+    accountant: 'Accountant',
+  };
+  return labels[role] || role;
+}
+
 export function Dashboard() {
   const { user, signOut, checkPermission } = useAuth();
   const [activeModule, setActiveModule] = useState<ModuleType>(() => moduleFromHash());
   const [stats, setStats] = useState<any>(() => {
     try {
+      if (!showExecutiveDashboard(user?.role)) {
+        return { ...EMPTY_DASHBOARD_STATS };
+      }
       return getDashboardStats();
     } catch {
       return { ...EMPTY_DASHBOARD_STATS };
@@ -101,10 +145,14 @@ export function Dashboard() {
   });
 
   useEffect(() => {
+    if (!showExecutiveDashboard(user?.role)) {
+      setStats({ ...EMPTY_DASHBOARD_STATS });
+      return;
+    }
     loadStats();
-    const interval = setInterval(loadStats, 30000); // Refresh every 30 seconds
+    const interval = setInterval(loadStats, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [user?.role]);
 
   // Normalize empty hash so the URL always reflects the home section (bookmark / refresh).
   useEffect(() => {
@@ -141,6 +189,38 @@ export function Dashboard() {
     }
   };
 
+  const roleDashboardLinks = (): RoleDashboardLink[] =>
+    MODULE_NAV_ITEMS.filter(
+      (i) => i.id !== 'dashboard' && navItemHasAccess(i, user?.role, checkPermission)
+    ).map((i) => ({
+      id: i.id,
+      label: i.label,
+      href: hashHrefForModule(i.id),
+      icon: i.icon,
+    }));
+
+  const renderDashboardHome = () => {
+    if (showExecutiveDashboard(user?.role)) {
+      return <DashboardHome stats={stats} onRefresh={loadStats} />;
+    }
+    if (!user?.id) {
+      return (
+        <div className="rounded-lg border border-slate-200 bg-white p-6 text-slate-600 text-sm">
+          Loading your profile…
+        </div>
+      );
+    }
+    return (
+      <RoleDashboardHome
+        userId={user.id}
+        role={user.role}
+        userName={user.name}
+        roleLabel={getRoleLabel(user.role)}
+        links={roleDashboardLinks()}
+      />
+    );
+  };
+
   const handleSignOut = () => {
     try {
       const { pathname, search } = window.location;
@@ -155,11 +235,17 @@ export function Dashboard() {
   const renderModule = () => {
     switch (activeModule) {
       case 'dashboard':
-        return <DashboardHome stats={stats} onRefresh={loadStats} />;
+        return renderDashboardHome();
       case 'reception':
         return <ReceptionModule />;
       case 'doctor':
         return <DoctorModule />;
+      case 'lab':
+        return <LabModule />;
+      case 'xray':
+        return <XRayModule />;
+      case 'surgery':
+        return <SurgeryModule />;
       case 'billing':
         return <BillingModule />;
       case 'pharmacy':
@@ -180,21 +266,8 @@ export function Dashboard() {
           </div>
         );
       default:
-        return <DashboardHome stats={stats} onRefresh={loadStats} />;
+        return renderDashboardHome();
     }
-  };
-
-  const getRoleLabel = (role: string) => {
-    const labels: Record<string, string> = {
-      admin: 'Administrator',
-      reception: 'Receptionist',
-      doctor: 'Doctor',
-      lab_operator: 'Lab Operator',
-      xray_operator: 'X-Ray Operator',
-      pharmacy: 'Pharmacist',
-      accountant: 'Accountant',
-    };
-    return labels[role] || role;
   };
 
   return (
@@ -204,12 +277,15 @@ export function Dashboard() {
         {/* Logo */}
         <div className="p-4 border-b border-slate-200">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
+            <div
+              className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center shrink-0"
+              aria-label="Animal Care Hospital"
+            >
               <Stethoscope className="w-5 h-5 text-white" />
             </div>
-            <div>
-              <h1 className="font-bold text-slate-900">VetClinic Pro</h1>
-              <p className="text-xs text-slate-500">Management System</p>
+            <div className="min-w-0">
+              <h1 className="font-bold text-slate-900 leading-tight">Animal Care Hospital</h1>
+              <p className="text-xs text-slate-500">Management system</p>
             </div>
           </div>
         </div>
@@ -278,24 +354,26 @@ export function Dashboard() {
                 })}
               </p>
             </div>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-6 text-sm">
-                <div className="text-center">
-                  <p className="text-slate-500">Today's Tokens</p>
-                  <p className="font-semibold text-slate-900">{stats?.today_tokens ?? 0}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-slate-500">Revenue</p>
-                  <p className="font-semibold text-green-600">
-                    ₹{Number(stats?.today_revenue ?? 0).toLocaleString()}
-                  </p>
-                </div>
-                <div className="text-center">
-                  <p className="text-slate-500">Waiting</p>
-                  <p className="font-semibold text-orange-600">{stats?.waiting_patients ?? 0}</p>
+            {showExecutiveDashboard(user?.role) && (
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-6 text-sm">
+                  <div className="text-center">
+                    <p className="text-slate-500">Today's Tokens</p>
+                    <p className="font-semibold text-slate-900">{stats?.today_tokens ?? 0}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-slate-500">Revenue</p>
+                    <p className="font-semibold text-green-600">
+                      ₹{Number(stats?.today_revenue ?? 0).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-slate-500">Waiting</p>
+                    <p className="font-semibold text-orange-600">{stats?.waiting_patients ?? 0}</p>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
         </header>
 

@@ -22,7 +22,7 @@ import {
 import {
   getTokenByNumber,
   getTokenWithDetails,
-  assignTokenToRoom,
+  referPatientToRooms,
   startToken,
   completeToken,
   getTodayTokensForDashboard,
@@ -35,6 +35,7 @@ import { useAuth } from '@/hooks/useAuth';
 import type { BillItemFormData, Room, Token } from '@/types';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 
 const REFERRAL_ROOMS = [
   { value: 'lab', label: 'Laboratory' },
@@ -83,10 +84,15 @@ export function DoctorModule() {
   const [customItemPrice, setCustomItemPrice] = useState('');
   const [itemQuantity, setItemQuantity] = useState('1');
   const [billDiscountPercent, setBillDiscountPercent] = useState('');
+  const [referralTargets, setReferralTargets] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     loadRooms();
   }, []);
+
+  useEffect(() => {
+    setReferralTargets(new Set());
+  }, [currentToken?.token?.id]);
 
   const refreshTokenQueue = () => {
     try {
@@ -388,25 +394,42 @@ export function DoctorModule() {
     }
   };
 
-  const handleRefer = (roomType: string) => {
+  const handleSendReferrals = () => {
     if (!currentToken) return;
     if (visitLocked) {
       toast.error('Cannot refer a completed or cancelled visit');
       return;
     }
 
-    const targetRoom = rooms.find((r) => r.type === roomType);
-    if (!targetRoom) {
-      toast.error('Target room not found. Check Admin → Rooms.');
+    const selected = REFERRAL_ROOMS.filter((r) => referralTargets.has(r.value));
+    if (selected.length === 0) {
+      toast.error('Select at least one destination');
       return;
     }
 
-    assignTokenToRoom(currentToken.token.id, targetRoom.id);
-    toast.success(`Patient referred to ${targetRoom.name}`);
+    const roomIds: number[] = [];
+    const missing: string[] = [];
+    for (const r of selected) {
+      const targetRoom = rooms.find((x) => x.type === r.value);
+      if (!targetRoom) missing.push(r.label);
+      else roomIds.push(targetRoom.id);
+    }
+    if (missing.length > 0) {
+      toast.error(`Add these in Admin → Rooms: ${missing.join(', ')}`);
+      return;
+    }
+
+    referPatientToRooms(currentToken.token.id, roomIds);
+    toast.success(
+      selected.length === 1
+        ? `Patient referred to ${selected[0].label}`
+        : `Referred to ${selected.length} places: ${selected.map((s) => s.label).join(', ')}`
+    );
 
     setCurrentToken(null);
     setCurrentBill(null);
     setTokenNumber('');
+    setReferralTargets(new Set());
     refreshTokenQueue();
   };
 
@@ -756,36 +779,83 @@ export function DoctorModule() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <ArrowRight className="w-5 h-5" />
-                    Refer Patient
+                    Refer patient
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 gap-4">
+                <CardContent className="space-y-4">
+                  <p className="text-sm text-slate-600">
+                    Tick every department this patient should visit today — for example lab and X-ray together, or only
+                    pharmacy. They can complete stops in any order unless a room is already busy with them.
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {REFERRAL_ROOMS.map((room) => (
-                      <Button
+                      <label
                         key={room.value}
-                        type="button"
-                        variant="outline"
-                        className="h-20 flex flex-col items-center justify-center"
-                        onClick={() => handleRefer(room.value)}
-                        disabled={visitLocked}
+                        className={`flex items-center gap-3 rounded-lg border p-4 cursor-pointer transition-colors ${
+                          referralTargets.has(room.value)
+                            ? 'border-blue-400 bg-blue-50'
+                            : 'border-slate-200 hover:bg-slate-50'
+                        } ${visitLocked ? 'opacity-60 pointer-events-none' : ''}`}
                       >
-                        <ArrowRight className="w-6 h-6 mb-2" />
-                        {room.label}
-                      </Button>
+                        <Checkbox
+                          checked={referralTargets.has(room.value)}
+                          onCheckedChange={() => {
+                            setReferralTargets((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(room.value)) next.delete(room.value);
+                              else next.add(room.value);
+                              return next;
+                            });
+                          }}
+                          disabled={visitLocked}
+                        />
+                        <span className="font-medium text-slate-900">{room.label}</span>
+                      </label>
                     ))}
                   </div>
 
-                  <div className="mt-6">
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setReferralTargets(new Set(REFERRAL_ROOMS.map((r) => r.value)))}
+                      disabled={visitLocked}
+                    >
+                      Select all
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setReferralTargets(new Set())}
+                      disabled={visitLocked}
+                    >
+                      Clear
+                    </Button>
+                  </div>
+
+                  <Button
+                    type="button"
+                    className="w-full"
+                    onClick={handleSendReferrals}
+                    disabled={visitLocked}
+                  >
+                    <ArrowRight className="w-4 h-4 mr-2" />
+                    Send to selected
+                  </Button>
+
+                  <div className="pt-2 border-t border-slate-100">
                     <Button
                       type="button"
                       onClick={handleComplete}
                       className="w-full"
-                      variant="default"
+                      variant="secondary"
                       disabled={visitLocked}
                     >
                       <ClipboardList className="w-4 h-4 mr-2" />
-                      Complete Visit
+                      Complete visit
                     </Button>
                   </div>
                 </CardContent>

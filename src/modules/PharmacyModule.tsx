@@ -14,6 +14,8 @@ import {
   Trash2,
   Package,
   Percent,
+  ListOrdered,
+  RefreshCw,
 } from 'lucide-react';
 import { getPharmacyItems, searchInventory, getInventoryItemById } from '@/lib/services/inventoryService';
 import {
@@ -24,6 +26,14 @@ import {
   applyDiscount,
 } from '@/lib/services/billingService';
 import { getRoomsByType } from '@/lib/services/roomService';
+import {
+  getWaitingTokensByRoomType,
+  getTokenById,
+  activateReferralAtRoom,
+  hasPendingReferralToRoom,
+  completeOperatorRoomVisit,
+} from '@/lib/services/tokenService';
+import type { RoomQueueItem } from '@/types';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { billItemProviderLabel } from '@/lib/billItemDisplay';
@@ -53,10 +63,25 @@ export function PharmacyModule() {
   const [pharmacyItems, setPharmacyItems] = useState<any[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [discountPercent, setDiscountPercent] = useState('');
+  const [referralQueue, setReferralQueue] = useState<RoomQueueItem[]>([]);
+
+  const refreshReferralQueue = () => {
+    try {
+      setReferralQueue(getWaitingTokensByRoomType('pharmacy'));
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   useEffect(() => {
     loadPharmacyItems();
     loadDispenseBills();
+  }, []);
+
+  useEffect(() => {
+    refreshReferralQueue();
+    const t = setInterval(refreshReferralQueue, 15000);
+    return () => clearInterval(t);
   }, []);
 
   const loadPharmacyItems = () => {
@@ -74,6 +99,69 @@ export function PharmacyModule() {
     const pending = getPendingBillsForDisplay();
     setDispenseBills(pending);
     setBillSearchResults([]);
+  };
+
+  const handleOpenReferralQueueRow = (row: RoomQueueItem) => {
+    const token = getTokenById(row.token_id);
+    if (!token) {
+      toast.error('Token no longer available');
+      refreshReferralQueue();
+      return;
+    }
+    const pharmacyRooms = getRoomsByType('pharmacy');
+    const pharmacyRoom = pharmacyRooms[0];
+    if (!pharmacyRoom?.id) {
+      toast.error('No Pharmacy room configured. Add it under Admin → Rooms.');
+      return;
+    }
+    if (hasPendingReferralToRoom(token.id, pharmacyRoom.id) && Number(token.room_id) !== pharmacyRoom.id) {
+      activateReferralAtRoom(token.id, pharmacyRoom.id);
+    }
+    const details = getBillWithDetails(token.bill_id);
+    if (!details) {
+      toast.error('Failed to load bill details');
+      return;
+    }
+    setCurrentBill(details);
+    setCart([]);
+    setSearchResults([]);
+    setSearchTerm('');
+    const p = Number(details.bill?.discount_percent);
+    setDiscountPercent(Number.isFinite(p) && p > 0 ? String(p) : '');
+    toast.success(`Bill loaded for token #${token.token_number}`);
+    refreshReferralQueue();
+  };
+
+  const handleCompletePharmacyReferral = () => {
+    if (!currentBill?.token?.id || !currentBill?.bill?.id) {
+      toast.error('No token for this bill');
+      return;
+    }
+    const pharmacyRooms = getRoomsByType('pharmacy');
+    const pharmacyRoom = pharmacyRooms[0];
+    if (!pharmacyRoom?.id) {
+      toast.error('No Pharmacy room configured');
+      return;
+    }
+    const tid = currentBill.token.id;
+    if (!hasPendingReferralToRoom(tid, pharmacyRoom.id)) {
+      toast.error('No active pharmacy referral for this visit');
+      return;
+    }
+    const result = completeOperatorRoomVisit(tid, pharmacyRoom.id);
+    if (result.legacyCompleted) {
+      toast.success('Visit completed');
+    } else if (result.returnedToDoctor) {
+      toast.success('Pharmacy step done — patient returned to doctor queue');
+    } else if (result.moreReferralsPending) {
+      toast.success('Pharmacy step done — patient has other referrals today');
+    } else {
+      toast.success('Pharmacy referral completed');
+    }
+    const updated = getBillWithDetails(currentBill.bill.id);
+    if (updated) setCurrentBill(updated);
+    refreshReferralQueue();
+    loadDispenseBills();
   };
 
   const handleSearchBillsForDispense = () => {
@@ -101,6 +189,7 @@ export function PharmacyModule() {
     const p = Number(details.bill?.discount_percent);
     setDiscountPercent(Number.isFinite(p) && p > 0 ? String(p) : '');
     toast.success('Bill loaded for dispensing');
+    refreshReferralQueue();
   };
 
   const handleApplyDiscount = () => {
@@ -229,12 +318,19 @@ export function PharmacyModule() {
       setCart([]);
       loadPharmacyItems();
       loadDispenseBills();
+      refreshReferralQueue();
     } catch (error: any) {
       toast.error(error?.message || 'Failed to add items (check stock)');
     }
   };
 
   const cartTotal = cart.reduce((sum, item) => sum + item.total_price, 0);
+
+  const pharmacyRoom = getRoomsByType('pharmacy')[0];
+  const showCompletePharmacyStep =
+    currentBill?.token?.id != null &&
+    pharmacyRoom != null &&
+    hasPendingReferralToRoom(currentBill.token.id, pharmacyRoom.id);
 
   return (
     <div className="space-y-6">
@@ -247,8 +343,9 @@ export function PharmacyModule() {
         {/* Dispense Tab */}
         <TabsContent value="dispense" className="space-y-4">
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 items-start">
+            <div className="xl:col-span-1 space-y-4">
             {/* Bills side panel */}
-            <Card className="xl:col-span-1">
+            <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Search className="w-5 h-5" />
@@ -315,33 +412,95 @@ export function PharmacyModule() {
               </CardContent>
             </Card>
 
+            <Card className="border-violet-200 bg-violet-50/40">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between gap-2">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <ListOrdered className="w-5 h-5 text-violet-700" />
+                    Doctor referrals (today)
+                  </CardTitle>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="shrink-0 h-8 w-8"
+                    onClick={refreshReferralQueue}
+                    title="Refresh queue"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </Button>
+                </div>
+                <p className="text-sm text-slate-600">
+                  Patients sent here from the doctor. Click a row to load their bill.
+                </p>
+              </CardHeader>
+              <CardContent>
+                <div className="max-h-48 overflow-y-auto space-y-1 pr-1 -mr-1">
+                  {referralQueue.length === 0 ? (
+                    <p className="text-sm text-slate-500 py-4 text-center">No referred patients in queue.</p>
+                  ) : (
+                    referralQueue.map((row) => (
+                      <button
+                        key={row.token_id}
+                        type="button"
+                        onClick={() => handleOpenReferralQueueRow(row)}
+                        className="w-full text-left rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm hover:bg-violet-50/80 transition-colors"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-slate-900">Token #{row.token_number}</span>
+                          <Badge variant="outline" className="text-[10px] uppercase">
+                            {row.status}
+                          </Badge>
+                        </div>
+                        <p className="text-slate-700 truncate mt-0.5">{row.patient_name}</p>
+                        <p className="text-xs text-slate-500 truncate">{row.animal_name}</p>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+            </div>
+
             {/* Current bill / cart */}
             <div className="xl:col-span-2 space-y-4">
               {currentBill ? (
                 <>
                   <Card className="bg-green-50 border-green-200">
                     <CardContent className="p-4">
-                      <div className="flex items-center justify-between gap-3">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div>
                           <p className="font-semibold">{currentBill.bill.bill_code}</p>
                           <p className="text-sm text-slate-600">
                             {currentBill.patient?.owner_name} - {currentBill.animal?.name}
                           </p>
+                          {currentBill.token?.token_number != null && (
+                            <p className="text-xs text-slate-500 mt-1">
+                              Token #{currentBill.token.token_number}
+                            </p>
+                          )}
                         </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setCurrentBill(null);
-                            setCart([]);
-                            setSearchResults([]);
-                            setSearchTerm('');
-                            setDiscountPercent('');
-                          }}
-                        >
-                          Change
-                        </Button>
+                        <div className="flex flex-col sm:items-end gap-2 shrink-0">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setCurrentBill(null);
+                              setCart([]);
+                              setSearchResults([]);
+                              setSearchTerm('');
+                              setDiscountPercent('');
+                            }}
+                          >
+                            Change
+                          </Button>
+                          {showCompletePharmacyStep && (
+                            <Button type="button" size="sm" onClick={handleCompletePharmacyReferral}>
+                              Complete pharmacy visit
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </CardContent>
                   </Card>

@@ -251,7 +251,7 @@ export function ReportsModule() {
       'created_at',
       'completed_at',
     ];
-    downloadCsv(`vetclinic-daily-${dailyDate}.csv`, headers, billRowsToCsvRecords(dailyLedger));
+    downloadCsv(`animal-care-hospital-daily-${dailyDate}.csv`, headers, billRowsToCsvRecords(dailyLedger));
     toast.success('CSV downloaded');
   };
 
@@ -274,7 +274,7 @@ export function ReportsModule() {
       'completed_at',
     ];
     downloadCsv(
-      `vetclinic-${rangeReport.start_date}_to_${rangeReport.end_date}.csv`,
+      `animal-care-hospital-${rangeReport.start_date}_to_${rangeReport.end_date}.csv`,
       headers,
       billRowsToCsvRecords(rangeLedger)
     );
@@ -296,7 +296,7 @@ export function ReportsModule() {
       'created_at',
       'completed_at',
     ];
-    downloadCsv('vetclinic-all-completed-bills.csv', headers, billRowsToCsvRecords(bills));
+    downloadCsv('animal-care-hospital-all-completed-bills.csv', headers, billRowsToCsvRecords(bills));
     toast.success('CSV downloaded');
   };
 

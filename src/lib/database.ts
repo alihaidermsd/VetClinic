@@ -1,4 +1,4 @@
-// Simple in-memory database for VetClinic Pro
+// Simple in-memory database for Animal Care Hospital
 // This provides a reliable fallback that works in all browsers
 
 interface Table {
@@ -21,6 +21,13 @@ export async function initDatabase(): Promise<any> {
       const parsed = JSON.parse(savedDb);
       db = parsed.data || {};
       lastIds = parsed.lastIds || {};
+      if (!db.token_referrals) {
+        db.token_referrals = {};
+      }
+      if (lastIds.token_referrals == null) {
+        lastIds.token_referrals = 0;
+      }
+      saveDatabase();
     } else {
       // Create fresh database
       db = {};
@@ -58,8 +65,9 @@ export function saveDatabase() {
 // Create all tables
 function createTables() {
   const tables = [
-    'users', 'rooms', 'patients', 'animals', 'tokens', 'bills', 
-    'bill_items', 'inventory', 'medical_records', 'payments', 'audit_logs', 'app_settings'
+    'users', 'rooms', 'patients', 'animals', 'tokens', 'bills',
+    'bill_items', 'inventory', 'medical_records', 'payments', 'audit_logs', 'app_settings',
+    'token_referrals',
   ];
   
   tables.forEach(table => {

@@ -21,6 +21,8 @@ export interface BillDetailsForPrint {
     item_name: string;
     room_name?: string;
     operator_name?: string;
+    operator_id?: number;
+    item_type?: string;
     quantity: number;
     unit_price: number;
     total_price: number;
@@ -83,7 +85,12 @@ export function printBillReceipt(d: BillDetailsForPrint): boolean {
 
   const itemsRows = (d.items || [])
     .map((item) => {
-      const provider = billItemProviderLabel(item);
+      const provider = billItemProviderLabel({
+        operator_name: item.operator_name,
+        operator_id: item.operator_id,
+        room_name: item.room_name,
+        item_type: item.item_type,
+      });
       const sub =
         provider && provider !== '—'
           ? `<div class="muted small">${escapeHtml(provider)}</div>`
@@ -221,7 +228,7 @@ export function printBillReceipt(d: BillDetailsForPrint): boolean {
   </style>
 </head>
 <body>
-  <div class="brand">VetClinic Pro</div>
+  <div class="brand">Animal Care Hospital</div>
   <div class="doc-title">Customer bill / receipt</div>
   ${banner}
   <div class="bill-code">${escapeHtml(bill.bill_code)}</div>

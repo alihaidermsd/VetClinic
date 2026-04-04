@@ -67,6 +67,8 @@ function buildPrintPayload(details: {
       item_name: String(item.item_name ?? ''),
       room_name: item.room_name != null ? String(item.room_name) : undefined,
       operator_name: item.operator_name != null ? String(item.operator_name) : undefined,
+      operator_id: item.operator_id != null ? Number(item.operator_id) : undefined,
+      item_type: item.item_type != null ? String(item.item_type) : undefined,
       quantity: Number(item.quantity) || 0,
       unit_price: Number(item.unit_price) || 0,
       total_price: Number(item.total_price) || 0,

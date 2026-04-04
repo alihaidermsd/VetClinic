@@ -16,15 +16,27 @@ export type UserRole =
   | 'doctor' 
   | 'lab_operator' 
   | 'xray_operator' 
+  | 'surgery_operator'
   | 'pharmacy' 
   | 'accountant';
 
 export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
   admin: ['*'],
   reception: ['reception', 'billing', 'pharmacy', 'inventory', 'view_bills'],
-  doctor: ['doctor_room', 'patients', 'view_bills', 'add_charges'],
+  doctor: [
+    'doctor_room',
+    'lab',
+    'xray',
+    'surgery',
+    'pharmacy',
+    'inventory',
+    'patients',
+    'view_bills',
+    'add_charges',
+  ],
   lab_operator: ['lab', 'add_charges', 'view_bills'],
   xray_operator: ['xray', 'add_charges', 'view_bills'],
+  surgery_operator: ['surgery', 'add_charges', 'view_bills'],
   pharmacy: ['pharmacy', 'inventory', 'add_charges', 'view_bills'],
   accountant: ['billing', 'reports', 'view_bills'],
 };
@@ -94,6 +106,17 @@ export interface Token {
 }
 
 export type TokenStatus = 'waiting' | 'in_progress' | 'completed' | 'cancelled';
+
+/** Doctor can send one patient to several rooms the same day; each row is one stop. */
+export type TokenReferralStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
+
+export interface TokenReferral {
+  id: number;
+  token_id: number;
+  room_id: number;
+  status: TokenReferralStatus;
+  created_at: string;
+}
 
 // Bill Types
 export interface Bill {

@@ -122,9 +122,20 @@ export function hasPermission(userRole: UserRole, permission: string): boolean {
   const permissions: Record<UserRole, string[]> = {
     admin: ['*'],
     reception: ['reception', 'billing', 'pharmacy', 'inventory', 'view_bills'],
-    doctor: ['doctor_room', 'patients', 'view_bills', 'add_charges'],
+    doctor: [
+      'doctor_room',
+      'lab',
+      'xray',
+      'surgery',
+      'pharmacy',
+      'inventory',
+      'patients',
+      'view_bills',
+      'add_charges',
+    ],
     lab_operator: ['lab', 'add_charges', 'view_bills'],
     xray_operator: ['xray', 'add_charges', 'view_bills'],
+    surgery_operator: ['surgery', 'add_charges', 'view_bills'],
     pharmacy: ['pharmacy', 'inventory', 'add_charges', 'view_bills'],
     accountant: ['billing', 'reports', 'view_bills'],
   };

@@ -41,6 +41,7 @@ const ROLES: { value: UserRole; label: string }[] = [
   { value: 'doctor', label: 'Doctor' },
   { value: 'lab_operator', label: 'Lab Operator' },
   { value: 'xray_operator', label: 'X-Ray Operator' },
+  { value: 'surgery_operator', label: 'Surgery Operator' },
   { value: 'pharmacy', label: 'Pharmacist' },
   { value: 'accountant', label: 'Accountant' },
 ];
@@ -271,7 +272,7 @@ export function AdminModule() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `vetclinic_backup_${new Date().toISOString().split('T')[0]}.json`;
+      a.download = `animal_care_hospital_backup_${new Date().toISOString().split('T')[0]}.json`;
       a.click();
       toast.success('Database exported successfully');
     } catch {
