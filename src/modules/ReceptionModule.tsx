@@ -5,6 +5,13 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -16,12 +23,32 @@ import { createWalkInPatient, searchPatients } from '@/lib/services/patientServi
 import { createToken, getTodayTokensForReception, type ReceptionTokenRow } from '@/lib/services/tokenService';
 import { getBillById } from '@/lib/services/billingService';
 import { printTokenSlip } from '@/lib/printToken';
-import type { Animal } from '@/types';
+import type { Animal, AnimalType } from '@/types';
 import { toast } from 'sonner';
+
+const RECEPTION_SPECIES_OPTIONS: { value: AnimalType; label: string }[] = [
+  { value: 'dog', label: 'Dog' },
+  { value: 'cat', label: 'Cat' },
+  { value: 'cow', label: 'Cow' },
+  { value: 'bird', label: 'Bird' },
+  { value: 'tiger', label: 'Tiger' },
+  { value: 'other', label: 'Other — type below' },
+];
+
+function formatPetLineForToken(pet: string, type: AnimalType, customSpecies: string): string {
+  if (type === 'other') {
+    const s = customSpecies.trim();
+    return s ? `${pet} (${s})` : `${pet} (Other)`;
+  }
+  const label = RECEPTION_SPECIES_OPTIONS.find((o) => o.value === type)?.label ?? type;
+  return `${pet} (${label})`;
+}
 
 export function ReceptionModule() {
   const [customerName, setCustomerName] = useState('');
   const [petName, setPetName] = useState('');
+  const [petAnimalType, setPetAnimalType] = useState<AnimalType>('dog');
+  const [customSpecies, setCustomSpecies] = useState('');
   const [phone, setPhone] = useState('');
 
   const [queue, setQueue] = useState<ReceptionTokenRow[]>([]);
@@ -73,11 +100,22 @@ export function ReceptionModule() {
       toast.error('Enter customer name and pet name.');
       return;
     }
+    if (petAnimalType === 'other' && !customSpecies.trim()) {
+      toast.error('Choose “Other” species? Enter the animal type (e.g. goat, rabbit).');
+      return;
+    }
     try {
-      const { patient, animal } = createWalkInPatient(c, p, phone);
-      issueTokenAndPrint(patient.id, animal.id, c, p);
+      const { patient, animal } = createWalkInPatient(c, p, {
+        phone,
+        animalType: petAnimalType,
+        customSpecies: petAnimalType === 'other' ? customSpecies : undefined,
+      });
+      const petLine = formatPetLineForToken(p, petAnimalType, customSpecies);
+      issueTokenAndPrint(patient.id, animal.id, c, petLine);
       setCustomerName('');
       setPetName('');
+      setPetAnimalType('dog');
+      setCustomSpecies('');
       setPhone('');
     } catch (e) {
       console.error(e);
@@ -124,7 +162,7 @@ export function ReceptionModule() {
             New queue token
           </CardTitle>
           <p className="text-sm text-slate-500 font-normal">
-            Enter the customer and pet name, then press the button. A printable token opens for the customer.
+            Enter the customer and pet name, pick the animal type (or enter a custom species), then create the token.
             Phone is optional.
           </p>
         </CardHeader>
@@ -144,19 +182,56 @@ export function ReceptionModule() {
               onKeyDown={(e) => e.key === 'Enter' && handleQuickCreate()}
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="pet" className="flex items-center gap-2">
-              <PawPrint className="w-4 h-4" />
-              Pet name
-            </Label>
-            <Input
-              id="pet"
-              value={petName}
-              onChange={(e) => setPetName(e.target.value)}
-              placeholder="e.g. Bruno"
-              className="text-lg"
-              onKeyDown={(e) => e.key === 'Enter' && handleQuickCreate()}
-            />
+          <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+            <div className="space-y-2">
+              <Label htmlFor="pet" className="flex items-center gap-2">
+                <PawPrint className="w-4 h-4 text-blue-600" />
+                Pet name
+              </Label>
+              <Input
+                id="pet"
+                value={petName}
+                onChange={(e) => setPetName(e.target.value)}
+                placeholder="e.g. Bruno"
+                className="text-lg bg-white"
+                onKeyDown={(e) => e.key === 'Enter' && handleQuickCreate()}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="species" className="text-slate-700">
+                Animal type
+              </Label>
+              <Select
+                value={petAnimalType}
+                onValueChange={(v) => setPetAnimalType(v as AnimalType)}
+              >
+                <SelectTrigger id="species" className="h-11 w-full text-lg bg-white">
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {RECEPTION_SPECIES_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value} className="text-base">
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {petAnimalType === 'other' && (
+                <div className="space-y-1.5 pt-1">
+                  <Label htmlFor="custom-species" className="text-sm text-slate-600 font-normal">
+                    Custom species
+                  </Label>
+                  <Input
+                    id="custom-species"
+                    value={customSpecies}
+                    onChange={(e) => setCustomSpecies(e.target.value)}
+                    placeholder="e.g. Goat, Rabbit, Hamster, Parrot…"
+                    className="bg-white"
+                    onKeyDown={(e) => e.key === 'Enter' && handleQuickCreate()}
+                  />
+                </div>
+              )}
+            </div>
           </div>
           <div className="space-y-2">
             <Label htmlFor="ph" className="flex items-center gap-2 text-slate-600">

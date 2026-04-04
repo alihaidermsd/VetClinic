@@ -1,17 +1,17 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ElementType } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
-import { 
-  LayoutDashboard, 
-  Users, 
-  Pill, 
-  CreditCard, 
-  BarChart3, 
+import {
+  LayoutDashboard,
+  Users,
+  Pill,
+  CreditCard,
+  BarChart3,
   Settings,
   LogOut,
   Stethoscope,
   UserCircle,
-  Package
+  Package,
 } from 'lucide-react';
 import { ReceptionModule } from '@/modules/ReceptionModule';
 import { DoctorModule } from '@/modules/DoctorModule';
@@ -26,6 +26,47 @@ import { toast } from 'sonner';
 
 type ModuleType = 'dashboard' | 'reception' | 'doctor' | 'billing' | 'pharmacy' | 'inventory' | 'reports' | 'admin';
 
+const MODULE_IDS: ModuleType[] = [
+  'dashboard',
+  'reception',
+  'doctor',
+  'billing',
+  'pharmacy',
+  'inventory',
+  'reports',
+  'admin',
+];
+
+/** Read active section from `#/billing`-style hash (refresh-safe; works with `base: './'`). */
+function moduleFromHash(): ModuleType {
+  const seg = window.location.hash.replace(/^#\/?/, '').split('/')[0]?.toLowerCase() || '';
+  if (!seg) return 'dashboard';
+  return (MODULE_IDS.includes(seg as ModuleType) ? seg : 'dashboard') as ModuleType;
+}
+
+function hashHrefForModule(id: ModuleType): string {
+  return `#/${id}`;
+}
+
+type NavItem = {
+  id: ModuleType;
+  label: string;
+  icon: ElementType;
+  permission: string;
+  access: 'all' | 'permission' | 'admin_only';
+};
+
+const MODULE_NAV_ITEMS: NavItem[] = [
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'reception', access: 'all' },
+  { id: 'reception', label: 'Reception', icon: Users, permission: 'reception', access: 'permission' },
+  { id: 'doctor', label: 'Doctor Room', icon: Stethoscope, permission: 'doctor_room', access: 'permission' },
+  { id: 'billing', label: 'Billing', icon: CreditCard, permission: 'billing', access: 'permission' },
+  { id: 'pharmacy', label: 'Pharmacy', icon: Pill, permission: 'pharmacy', access: 'permission' },
+  { id: 'inventory', label: 'Inventory', icon: Package, permission: 'inventory', access: 'permission' },
+  { id: 'reports', label: 'Reports', icon: BarChart3, permission: 'reports', access: 'permission' },
+  { id: 'admin', label: 'Admin', icon: Settings, permission: '*', access: 'admin_only' },
+];
+
 const EMPTY_DASHBOARD_STATS = {
   today_tokens: 0,
   today_revenue: 0,
@@ -36,9 +77,21 @@ const EMPTY_DASHBOARD_STATS = {
   room_stats: [] as any[],
 };
 
+function navItemHasAccess(
+  item: NavItem,
+  userRole: string | undefined,
+  checkPermission: (p: string) => boolean
+): boolean {
+  return (
+    item.access === 'all' ||
+    (item.access === 'admin_only' && userRole === 'admin') ||
+    (item.access === 'permission' && checkPermission(item.permission))
+  );
+}
+
 export function Dashboard() {
   const { user, signOut, checkPermission } = useAuth();
-  const [activeModule, setActiveModule] = useState<ModuleType>('dashboard');
+  const [activeModule, setActiveModule] = useState<ModuleType>(() => moduleFromHash());
   const [stats, setStats] = useState<any>(() => {
     try {
       return getDashboardStats();
@@ -53,6 +106,31 @@ export function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
+  // Normalize empty hash so the URL always reflects the home section (bookmark / refresh).
+  useEffect(() => {
+    const h = window.location.hash;
+    if (!h || h === '#' || h === '#/') {
+      window.history.replaceState(null, '', '#/dashboard');
+    }
+  }, []);
+
+  useEffect(() => {
+    const onHashChange = () => setActiveModule(moduleFromHash());
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  // If the hash points to a module this user cannot open, fall back to dashboard.
+  useEffect(() => {
+    const item = MODULE_NAV_ITEMS.find((i) => i.id === activeModule);
+    if (!item) return;
+    if (navItemHasAccess(item, user?.role, checkPermission)) return;
+    setActiveModule('dashboard');
+    if (window.location.hash !== '#/dashboard') {
+      window.location.hash = '#/dashboard';
+    }
+  }, [activeModule, user?.role, checkPermission]);
+
   const loadStats = () => {
     try {
       const data = getDashboardStats();
@@ -64,20 +142,15 @@ export function Dashboard() {
   };
 
   const handleSignOut = () => {
+    try {
+      const { pathname, search } = window.location;
+      window.history.replaceState(null, '', `${pathname}${search}`);
+    } catch {
+      /* ignore */
+    }
     signOut();
     toast.success('Signed out successfully');
   };
-
-  const navigationItems: { id: ModuleType; label: string; icon: React.ElementType; permission: string }[] = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: '*' },
-    { id: 'reception', label: 'Reception', icon: Users, permission: 'reception' },
-    { id: 'doctor', label: 'Doctor Room', icon: Stethoscope, permission: 'doctor_room' },
-    { id: 'billing', label: 'Billing', icon: CreditCard, permission: 'billing' },
-    { id: 'pharmacy', label: 'Pharmacy', icon: Pill, permission: 'pharmacy' },
-    { id: 'inventory', label: 'Inventory', icon: Package, permission: 'inventory' },
-    { id: 'reports', label: 'Reports', icon: BarChart3, permission: 'reports' },
-    { id: 'admin', label: 'Admin', icon: Settings, permission: '*' },
-  ];
 
   const renderModule = () => {
     switch (activeModule) {
@@ -96,7 +169,16 @@ export function Dashboard() {
       case 'reports':
         return <ReportsModule />;
       case 'admin':
-        return <AdminModule />;
+        return user?.role === 'admin' ? (
+          <AdminModule />
+        ) : (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-amber-900">
+            <p className="font-medium">Access restricted</p>
+            <p className="text-sm mt-1 text-amber-800">
+              Only administrators can open this section.
+            </p>
+          </div>
+        );
       default:
         return <DashboardHome stats={stats} onRefresh={loadStats} />;
     }
@@ -134,24 +216,23 @@ export function Dashboard() {
 
         {/* Navigation */}
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-          {navigationItems.map((item) => {
-            const hasAccess = item.permission === '*' || checkPermission(item.permission);
-            if (!hasAccess) return null;
+          {MODULE_NAV_ITEMS.map((item) => {
+            if (!navItemHasAccess(item, user?.role, checkPermission)) return null;
 
             const Icon = item.icon;
             return (
-              <button
+              <a
                 key={item.id}
-                onClick={() => setActiveModule(item.id)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                href={hashHrefForModule(item.id)}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors no-underline ${
                   activeModule === item.id
                     ? 'bg-blue-50 text-blue-700'
                     : 'text-slate-600 hover:bg-slate-100'
                 }`}
               >
-                <Icon className="w-5 h-5" />
+                <Icon className="w-5 h-5 shrink-0" />
                 {item.label}
-              </button>
+              </a>
             );
           })}
         </nav>
@@ -186,7 +267,7 @@ export function Dashboard() {
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-xl font-semibold text-slate-900">
-                {navigationItems.find(item => item.id === activeModule)?.label}
+                {MODULE_NAV_ITEMS.find((item) => item.id === activeModule)?.label}
               </h2>
               <p className="text-sm text-slate-500">
                 {new Date().toLocaleDateString('en-US', { 

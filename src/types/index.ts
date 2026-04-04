@@ -21,7 +21,7 @@ export type UserRole =
 
 export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
   admin: ['*'],
-  reception: ['reception', 'billing', 'patients', 'view_bills'],
+  reception: ['reception', 'billing', 'pharmacy', 'inventory', 'view_bills'],
   doctor: ['doctor_room', 'patients', 'view_bills', 'add_charges'],
   lab_operator: ['lab', 'add_charges', 'view_bills'],
   xray_operator: ['xray', 'add_charges', 'view_bills'],
@@ -76,6 +76,7 @@ export type AnimalType =
   | 'cow' 
   | 'goat' 
   | 'bird' 
+  | 'tiger' 
   | 'other';
 
 // Token Types
@@ -264,6 +265,22 @@ export interface DoctorReport {
   doctor_name: string;
   total_patients: number;
   total_charges: number;
+}
+
+/** One row for reports: completed bill with customer context */
+export interface BillReportRow {
+  id: number;
+  bill_code: string;
+  created_at: string;
+  completed_at?: string;
+  total_amount: number;
+  discount_amount: number;
+  final_amount: number;
+  paid_amount: number;
+  payment_status: string;
+  payment_method?: string;
+  owner_name: string;
+  animal_name: string;
 }
 
 // Form Types

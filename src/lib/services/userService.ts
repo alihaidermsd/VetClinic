@@ -2,6 +2,11 @@ import { query, getOne, run } from '../database';
 import type { User, UserRole } from '@/types';
 import { hashPassword } from '../auth';
 
+/** Active users with the admin role (used to protect the last admin account). */
+export function getActiveAdminUserCount(): number {
+  return (getAllUsers() as User[]).filter((u) => u.role === 'admin' && u.is_active).length;
+}
+
 // Get all users
 export function getAllUsers(): User[] {
   return query('SELECT * FROM users ORDER BY name') as User[];
@@ -23,32 +28,72 @@ export function createUser(userData: {
   password: string;
   name: string;
   role: UserRole;
-  room_id?: number;
+  room_id?: number | null;
   is_active: boolean;
 }): User {
+  const username = userData.username.trim();
+  const name = userData.name.trim();
+  if (!username) {
+    throw new Error('Username is required');
+  }
+  if (!name) {
+    throw new Error('Name is required');
+  }
+  if (!userData.password || userData.password.length < 4) {
+    throw new Error('Password must be at least 4 characters');
+  }
+  const taken = getUserByUsername(username);
+  if (taken) {
+    throw new Error('That username is already in use');
+  }
+
   const hashedPassword = hashPassword(userData.password);
   const result = run(
     'INSERT INTO users (username, password, name, role, room_id, is_active) VALUES (?, ?, ?, ?, ?, ?)',
     [
-      userData.username,
+      username,
       hashedPassword,
-      userData.name,
+      name,
       userData.role,
-      userData.room_id || null,
+      userData.room_id != null && userData.room_id > 0 ? userData.room_id : null,
       userData.is_active ? 1 : 0,
     ]
   );
   return getUserById(result.lastInsertRowid) as User;
 }
 
+export type UserUpdateInput = Partial<Pick<User, 'name' | 'role' | 'is_active' | 'username'>> & {
+  /** Pass `null` to clear assigned room */
+  room_id?: number | null;
+  /** Plain-text new password (will be hashed) */
+  password?: string;
+};
+
 // Update user
-export function updateUser(id: number, updates: Partial<User>): User | null {
+export function updateUser(id: number, updates: UserUpdateInput): User | null {
   const sets: string[] = [];
   const values: any[] = [];
-  
+
+  if (updates.username !== undefined) {
+    const u = String(updates.username).trim();
+    if (!u) {
+      throw new Error('Username cannot be empty');
+    }
+    const existing = getUserByUsername(u);
+    if (existing && existing.id !== id) {
+      throw new Error('That username is already in use');
+    }
+    sets.push('username = ?');
+    values.push(u);
+  }
+
   if (updates.name !== undefined) {
+    const n = String(updates.name).trim();
+    if (!n) {
+      throw new Error('Name cannot be empty');
+    }
     sets.push('name = ?');
-    values.push(updates.name);
+    values.push(n);
   }
   if (updates.role !== undefined) {
     sets.push('role = ?');
@@ -56,13 +101,18 @@ export function updateUser(id: number, updates: Partial<User>): User | null {
   }
   if (updates.room_id !== undefined) {
     sets.push('room_id = ?');
-    values.push(updates.room_id);
+    values.push(
+      updates.room_id != null && Number(updates.room_id) > 0 ? updates.room_id : null
+    );
   }
   if (updates.is_active !== undefined) {
     sets.push('is_active = ?');
     values.push(updates.is_active ? 1 : 0);
   }
-  if (updates.password) {
+  if (updates.password !== undefined && updates.password.length > 0) {
+    if (updates.password.length < 4) {
+      throw new Error('Password must be at least 4 characters');
+    }
     sets.push('password = ?');
     values.push(hashPassword(updates.password));
   }

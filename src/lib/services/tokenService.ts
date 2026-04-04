@@ -113,18 +113,17 @@ export function createToken(patientId: number, animalId: number): Token {
   const ts = new Date().toISOString();
   const today = getCurrentDate();
 
-  // First create the token
+  // One `?` per column — paramsToObject maps by column index; mixed literals used to break this.
   const tokenResult = run(
-    'INSERT INTO tokens (token_number, bill_id, patient_id, animal_id, status, date, created_at) VALUES (?, 0, ?, ?, ?, ?, ?)',
-    [tokenNumber, patientId, animalId, 'waiting', today, ts]
+    'INSERT INTO tokens (token_number, bill_id, patient_id, animal_id, status, date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [tokenNumber, 0, patientId, animalId, 'waiting', today, ts]
   );
 
   const tokenId = tokenResult.lastInsertRowid;
 
-  // Then create the bill with the token ID
   const billResult = run(
-    'INSERT INTO bills (bill_code, patient_id, animal_id, token_id, total_amount, discount_amount, discount_percent, final_amount, paid_amount, payment_status, status, created_at, updated_at) VALUES (?, ?, ?, ?, 0, 0, 0, 0, 0, ?, ?, ?, ?)',
-    [billCode, patientId, animalId, tokenId, 'pending', 'active', ts, ts]
+    'INSERT INTO bills (bill_code, patient_id, animal_id, token_id, total_amount, discount_amount, discount_percent, final_amount, paid_amount, payment_status, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [billCode, patientId, animalId, tokenId, 0, 0, 0, 0, 0, 'pending', 'active', ts, ts]
   );
   
   // Update token with bill_id
@@ -197,9 +196,10 @@ export function updateTokenStatus(id: number, status: TokenStatus, roomId?: numb
   }
   
   if (status === 'completed') {
-    updates.push('completed_at = CURRENT_TIMESTAMP');
+    updates.push('completed_at = ?');
+    values.push(new Date().toISOString());
   }
-  
+
   values.push(id);
   run(`UPDATE tokens SET ${updates.join(', ')} WHERE id = ?`, values);
   

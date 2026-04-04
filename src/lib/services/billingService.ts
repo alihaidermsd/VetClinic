@@ -168,6 +168,82 @@ export function removeBillItem(itemId: number): boolean {
   return true;
 }
 
+const ISO_DATE_IN_FIELD = /\d{4}-\d{2}-\d{2}T\d{2}:/;
+
+function createdAtFromBillCode(billCode: unknown): string | null {
+  const m = String(billCode ?? '').match(/-(\d{8})-/);
+  if (!m) return null;
+  const d = m[1];
+  return `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}T12:00:00.000Z`;
+}
+
+/**
+ * Fixes bills/tokens created when INSERT used mixed `?` and literals: params were mapped to the
+ * wrong columns, so `created_at` was often missing and reports saw every date filter as empty.
+ * Idempotent — safe to run on every app load.
+ */
+export function migrateLegacyBillCorruption(): void {
+  const bills = listTable('bills') as any[];
+  const tokens = listTable('tokens') as any[];
+  const tokenById = Object.fromEntries(tokens.map((t) => [t.id, t]));
+
+  for (const b of bills) {
+    if (b?.id == null) continue;
+
+    let created: string | null =
+      b.created_at != null && String(b.created_at).trim() !== '' ? String(b.created_at) : null;
+
+    if (!created) {
+      const tok = tokenById[b.token_id];
+      if (tok?.created_at && String(tok.created_at).trim() !== '') {
+        created = String(tok.created_at);
+      }
+    }
+    if (!created) {
+      for (const cand of [b.discount_percent, b.final_amount, b.updated_at]) {
+        if (typeof cand === 'string' && ISO_DATE_IN_FIELD.test(cand)) {
+          created = cand;
+          break;
+        }
+      }
+    }
+    if (!created) {
+      created = createdAtFromBillCode(b.bill_code);
+    }
+
+    if (created && (!b.created_at || String(b.created_at).trim() === '')) {
+      run('UPDATE bills SET created_at = ? WHERE id = ?', [created, b.id]);
+    }
+
+    if (b.status === undefined || b.status === null || String(b.status).trim() === '') {
+      run('UPDATE bills SET status = ? WHERE id = ?', ['active', b.id]);
+    }
+
+    if (typeof b.discount_percent === 'string' && ISO_DATE_IN_FIELD.test(b.discount_percent)) {
+      run('UPDATE bills SET discount_percent = 0 WHERE id = ?', [b.id]);
+    }
+  }
+
+  // Legacy token INSERT also mis-mapped params; bill row has correct patient/animal.
+  for (const b of listTable('bills') as any[]) {
+    if (b?.token_id == null) continue;
+    run('UPDATE tokens SET patient_id = ?, animal_id = ? WHERE id = ?', [
+      b.patient_id,
+      b.animal_id,
+      b.token_id,
+    ]);
+  }
+
+  for (const b of listTable('bills') as any[]) {
+    if (b?.id == null) continue;
+    try {
+      updateBillTotals(b.id);
+    } catch {
+      /* ignore per-bill errors */
+    }
+  }
+}
+
 // Update bill totals
 function updateBillTotals(billId: number): void {
   const totals = getOne(
@@ -270,26 +346,26 @@ function updatePaymentStatus(billId: number): void {
 
 // Complete bill
 export function completeBill(billId: number, paymentMethod?: string): Bill | null {
+  const ts = new Date().toISOString();
+  // In-memory DB ignores SQL CURRENT_TIMESTAMP; pass explicit ISO strings so completed_at is stored.
   run(
-    'UPDATE bills SET status = ?, payment_method = ?, completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-    ['completed', paymentMethod || null, billId]
+    'UPDATE bills SET status = ?, payment_method = ?, completed_at = ?, updated_at = ? WHERE id = ?',
+    ['completed', paymentMethod || null, ts, ts, billId]
   );
-  
+
   // Also complete the token
   const bill = getBillById(billId);
   if (bill) {
-    run('UPDATE tokens SET status = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?', ['completed', bill.token_id]);
+    run('UPDATE tokens SET status = ?, completed_at = ? WHERE id = ?', ['completed', ts, bill.token_id]);
   }
-  
+
   return getBillById(billId);
 }
 
 // Cancel bill
 export function cancelBill(billId: number): Bill | null {
-  run(
-    'UPDATE bills SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-    ['cancelled', billId]
-  );
+  const ts = new Date().toISOString();
+  run('UPDATE bills SET status = ?, updated_at = ? WHERE id = ?', ['cancelled', ts, billId]);
   
   // Also cancel the token
   const bill = getBillById(billId);

@@ -121,7 +121,7 @@ export function deleteUser(id: number): boolean {
 export function hasPermission(userRole: UserRole, permission: string): boolean {
   const permissions: Record<UserRole, string[]> = {
     admin: ['*'],
-    reception: ['reception', 'billing', 'patients', 'view_bills'],
+    reception: ['reception', 'billing', 'pharmacy', 'inventory', 'view_bills'],
     doctor: ['doctor_room', 'patients', 'view_bills', 'add_charges'],
     lab_operator: ['lab', 'add_charges', 'view_bills'],
     xray_operator: ['xray', 'add_charges', 'view_bills'],

@@ -17,6 +17,7 @@ import {
   RefreshCw,
   ListOrdered,
   X,
+  Percent,
 } from 'lucide-react';
 import {
   getTokenByNumber,
@@ -27,11 +28,11 @@ import {
   getTodayTokensForDashboard,
   getTokenById,
 } from '@/lib/services/tokenService';
-import { getBillWithDetails, addBillItem } from '@/lib/services/billingService';
+import { getBillWithDetails, addBillItem, applyDiscount } from '@/lib/services/billingService';
 import { getMedicalRecordsByBillId, saveMedicalRecordForBill } from '@/lib/services/medicalService';
 import { getAllRooms } from '@/lib/services/roomService';
 import { useAuth } from '@/hooks/useAuth';
-import type { BillItemFormData, Token } from '@/types';
+import type { BillItemFormData, Room, Token } from '@/types';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 
@@ -41,6 +42,25 @@ const REFERRAL_ROOMS = [
   { value: 'surgery', label: 'Surgery Room' },
   { value: 'pharmacy', label: 'Pharmacy' },
 ];
+
+/** Use the doctor's assigned room from their user profile; avoid always attaching charges to the first doctor room. */
+function resolveDoctorBillRoom(
+  rooms: Room[],
+  assignedRoomId: number | null | undefined
+): { roomId: number; roomName: string } {
+  const id = assignedRoomId != null ? Number(assignedRoomId) : 0;
+  if (id > 0) {
+    const match = rooms.find((r) => Number(r.id) === id);
+    if (match) {
+      return { roomId: match.id, roomName: String(match.name || 'Doctor room') };
+    }
+  }
+  const first = rooms.find((r) => r.type === 'doctor_room');
+  return {
+    roomId: first?.id ?? 0,
+    roomName: String(first?.name || 'Doctor Room'),
+  };
+}
 
 export function DoctorModule() {
   const { user } = useAuth();
@@ -62,6 +82,7 @@ export function DoctorModule() {
   const [customItemName, setCustomItemName] = useState('');
   const [customItemPrice, setCustomItemPrice] = useState('');
   const [itemQuantity, setItemQuantity] = useState('1');
+  const [billDiscountPercent, setBillDiscountPercent] = useState('');
 
   useEffect(() => {
     loadRooms();
@@ -87,6 +108,16 @@ export function DoctorModule() {
     setCustomItemPrice('');
     setItemQuantity('1');
   }, [currentToken?.token?.id]);
+
+  useEffect(() => {
+    const b = currentBill?.bill;
+    if (!b?.id) {
+      setBillDiscountPercent('');
+      return;
+    }
+    const p = Number(b.discount_percent);
+    setBillDiscountPercent(Number.isFinite(p) && p > 0 ? String(p) : '');
+  }, [currentBill?.bill?.id]);
 
   /** Load or reset examination fields when the active visit changes; prefer latest saved record for this bill. */
   useEffect(() => {
@@ -248,9 +279,7 @@ export function DoctorModule() {
     };
 
     try {
-      const doctorRoom = rooms.find((r) => r.type === 'doctor_room');
-      const roomId = doctorRoom?.id ?? 0;
-      const roomName = doctorRoom?.name || 'Doctor Room';
+      const { roomId, roomName } = resolveDoctorBillRoom(rooms, user.room_id);
       addBillItem(currentBill.bill.id, itemData, roomId, roomName, user.id, user.name);
 
       const updatedBill = getBillWithDetails(currentBill.bill.id);
@@ -271,9 +300,44 @@ export function DoctorModule() {
     }
   };
 
+  const handleApplyBillDiscount = () => {
+    if (!currentBill?.bill?.id || visitLocked) return;
+    const pct = parseFloat(billDiscountPercent);
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+      toast.error('Enter a discount between 0 and 100');
+      return;
+    }
+    try {
+      applyDiscount(currentBill.bill.id, pct);
+      const updated = getBillWithDetails(currentBill.bill.id);
+      if (updated) setCurrentBill(updated);
+      toast.success(pct === 0 ? 'Discount removed' : 'Discount updated');
+      setBillDiscountPercent(pct === 0 ? '' : String(pct));
+    } catch {
+      toast.error('Could not update discount');
+    }
+  };
+
+  const handleRemoveBillDiscount = () => {
+    if (!currentBill?.bill?.id || visitLocked) return;
+    try {
+      applyDiscount(currentBill.bill.id, 0);
+      const updated = getBillWithDetails(currentBill.bill.id);
+      if (updated) setCurrentBill(updated);
+      setBillDiscountPercent('');
+      toast.success('Discount removed');
+    } catch {
+      toast.error('Could not remove discount');
+    }
+  };
+
   const handleSaveMedicalRecord = () => {
     if (!currentToken || !currentBill || !user) {
       toast.error('Load a visit first');
+      return;
+    }
+    if (!currentToken.patient?.id || !currentToken.animal?.id) {
+      toast.error('Patient or animal data is missing for this visit — reload the token.');
       return;
     }
     if (visitLocked) {
@@ -296,13 +360,23 @@ export function DoctorModule() {
         animal_id: currentToken.animal.id,
         doctor_id: user.id,
         doctor_name: user.name,
-        room_id: rooms.find((r) => r.type === 'doctor_room')?.id || 0,
+        room_id: resolveDoctorBillRoom(rooms, user.room_id).roomId,
         diagnosis,
         symptoms,
         treatment,
         notes,
         follow_up_date: followUpDate.trim() ? followUpDate : null,
       });
+
+      const savedRows = getMedicalRecordsByBillId(currentBill.bill.id);
+      const latest = savedRows[0];
+      if (latest) {
+        setDiagnosis(latest.diagnosis ?? '');
+        setSymptoms(latest.symptoms ?? '');
+        setTreatment(latest.treatment ?? '');
+        setNotes(latest.notes ?? '');
+        setFollowUpDate(latest.follow_up_date ?? '');
+      }
 
       const refreshed = getBillWithDetails(currentBill.bill.id);
       if (refreshed) setCurrentBill(refreshed);
@@ -506,7 +580,12 @@ export function DoctorModule() {
                       disabled={visitLocked}
                     />
                   </div>
-                  <Button onClick={handleSaveMedicalRecord} className="w-full" disabled={visitLocked}>
+                  <Button
+                    type="button"
+                    onClick={handleSaveMedicalRecord}
+                    className="w-full"
+                    disabled={visitLocked}
+                  >
                     <FileText className="w-4 h-4 mr-2" />
                     Save Medical Record
                   </Button>
@@ -557,6 +636,38 @@ export function DoctorModule() {
                       <Button type="button" onClick={() => handleAddCharge()} disabled={visitLocked}>
                         Add
                       </Button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3 space-y-2">
+                    <Label className="flex items-center gap-2 text-slate-800">
+                      <Percent className="w-4 h-4" />
+                      Bill discount (%)
+                    </Label>
+                    <p className="text-xs text-slate-600">
+                      If the customer asks for a discount, set a percentage off the full bill (including pharmacy items
+                      later).
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={0.5}
+                        placeholder="e.g. 10"
+                        value={billDiscountPercent}
+                        onChange={(e) => setBillDiscountPercent(e.target.value)}
+                        className="w-28 bg-white"
+                        disabled={visitLocked}
+                      />
+                      <Button type="button" variant="secondary" size="sm" onClick={handleApplyBillDiscount} disabled={visitLocked}>
+                        {Number(currentBill?.bill?.discount_percent) > 0 ? 'Update' : 'Apply'}
+                      </Button>
+                      {Number(currentBill?.bill?.discount_percent) > 0 && (
+                        <Button type="button" variant="outline" size="sm" onClick={handleRemoveBillDiscount} disabled={visitLocked}>
+                          Remove
+                        </Button>
+                      )}
                     </div>
                   </div>
 

@@ -28,7 +28,6 @@ export async function initDatabase(): Promise<any> {
       createTables();
       seedData();
     }
-    return db;
   } catch (error) {
     console.error('Database initialization error:', error);
     // Fallback to fresh database
@@ -36,8 +35,15 @@ export async function initDatabase(): Promise<any> {
     lastIds = {};
     createTables();
     seedData();
-    return db;
+  } finally {
+    try {
+      const { migrateLegacyBillCorruption } = await import('./services/billingService');
+      migrateLegacyBillCorruption();
+    } catch (e) {
+      console.error('Legacy bill migration failed:', e);
+    }
   }
+  return db;
 }
 
 // Save database to localStorage
