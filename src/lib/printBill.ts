@@ -1,4 +1,5 @@
 import { billItemProviderLabel } from '@/lib/billItemDisplay';
+import { brandLogoUrl } from '@/lib/brandLogoUrl';
 
 /** Data needed to render a customer-facing bill receipt in a print window. */
 export interface BillDetailsForPrint {
@@ -60,6 +61,7 @@ function paymentMethodLabel(m: string): string {
 
 /** Opens a dedicated window and prints only the bill receipt. Returns false if the pop-up was blocked. */
 export function printBillReceipt(d: BillDetailsForPrint): boolean {
+  const logoUrl = brandLogoUrl();
   const now = new Date();
   const dateStr = now.toLocaleDateString(undefined, {
     year: 'numeric',
@@ -148,6 +150,8 @@ export function printBillReceipt(d: BillDetailsForPrint): boolean {
       font-size: 13px;
       line-height: 1.45;
     }
+    .logo-wrap { text-align: center; margin-bottom: 10px; }
+    .logo-wrap img { max-height: 64px; width: auto; display: inline-block; vertical-align: middle; }
     .brand { text-align: center; font-size: 15px; font-weight: 800; color: #1e40af; letter-spacing: 0.02em; }
     .doc-title { text-align: center; font-size: 12px; color: #64748b; margin-top: 4px; margin-bottom: 14px; }
     .paid-banner {
@@ -228,6 +232,7 @@ export function printBillReceipt(d: BillDetailsForPrint): boolean {
   </style>
 </head>
 <body>
+  <div class="logo-wrap"><img src="${escapeHtml(logoUrl)}" alt="Animal Care Hospital" /></div>
   <div class="brand">Animal Care Hospital</div>
   <div class="doc-title">Customer bill / receipt</div>
   ${banner}

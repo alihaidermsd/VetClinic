@@ -1,4 +1,5 @@
 import { getBillWithDetails } from '@/lib/services/billingService';
+import { brandLogoUrl } from '@/lib/brandLogoUrl';
 import type { MedicalRecord } from '@/types';
 
 function escapeHtml(s: string): string {
@@ -48,6 +49,7 @@ export function buildPatientRecordHtml(billId: number): string | null {
   const d = getBillWithDetails(billId);
   if (!d) return null;
 
+  const logoUrl = brandLogoUrl();
   const { bill, patient, animal, token, items, medicalRecords } = d;
   const mr = (medicalRecords?.[0] ?? null) as MedicalRecord | null;
 
@@ -90,6 +92,8 @@ export function buildPatientRecordHtml(billId: number): string | null {
   <title>Patient record — ${escapeHtml(bill.bill_code)}</title>
   <style>
     body { font-family: system-ui, Segoe UI, sans-serif; color: #0f172a; padding: 24px; max-width: 900px; margin: 0 auto; }
+    .logo-wrap { text-align: center; margin-bottom: 12px; }
+    .logo-wrap img { max-height: 64px; width: auto; display: inline-block; vertical-align: middle; }
     h1 { font-size: 1.35rem; margin: 0 0 8px; }
     h2 { font-size: 1.05rem; margin: 20px 0 8px; color: #334155; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
     h3 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; margin: 12px 0 6px; }
@@ -106,6 +110,7 @@ export function buildPatientRecordHtml(billId: number): string | null {
   </style>
 </head>
 <body>
+  <div class="logo-wrap"><img src="${escapeHtml(logoUrl)}" alt="Animal Care Hospital" /></div>
   <h1>Animal Care Hospital — Patient clinical record</h1>
   <p class="meta">
     <strong>Bill:</strong> ${escapeHtml(bill.bill_code)} &nbsp;|&nbsp;

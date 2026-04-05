@@ -1,7 +1,20 @@
 /* Animal Care Hospital - custom styles */
 
+.print-only {
+  display: none;
+}
+
+.print-page-brand img {
+  max-height: 80px;
+  width: auto;
+}
+
 /* Print styles for invoices */
 @media print {
+  .dashboard-root {
+    display: block !important;
+  }
+
   .no-print {
     display: none !important;
   }

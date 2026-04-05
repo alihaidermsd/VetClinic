@@ -309,23 +309,30 @@ export function Dashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
+    <div className="dashboard-root min-h-screen bg-slate-50 flex">
+      <div className="print-only print-page-brand w-full max-w-[220px] mx-auto py-3 text-center">
+        <img
+          src={`${import.meta.env.BASE_URL}logo.png`}
+          alt=""
+          className="max-h-20 w-auto mx-auto object-contain"
+        />
+      </div>
+
       {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-slate-200 flex flex-col">
-        {/* Logo */}
+      <aside className="w-64 bg-white border-r border-slate-200 flex flex-col no-print">
+        {/* Logo — links to dashboard */}
         <div className="p-4 border-b border-slate-200">
-          <div className="flex items-center gap-3">
-            <div
-              className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center shrink-0"
-              aria-label="Animal Care Hospital"
-            >
-              <Stethoscope className="w-5 h-5 text-white" />
-            </div>
-            <div className="min-w-0">
-              <h1 className="font-bold text-slate-900 leading-tight">Animal Care Hospital</h1>
-              <p className="text-xs text-slate-500">Management system</p>
-            </div>
-          </div>
+          <a
+            href={hashHrefForModule('dashboard')}
+            className="flex flex-col gap-1 rounded-lg p-1 -m-1 hover:bg-slate-50 transition-colors no-underline text-inherit outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+          >
+            <img
+              src={`${import.meta.env.BASE_URL}logo.png`}
+              alt="Animal Care Hospital — go to dashboard"
+              className="w-full max-h-[72px] object-contain object-left"
+            />
+            <p className="text-xs text-slate-500">Management system</p>
+          </a>
         </div>
 
         {/* Navigation */}
@@ -377,7 +384,7 @@ export function Dashboard() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
-        <header className="bg-white border-b border-slate-200 px-6 py-4">
+        <header className="bg-white border-b border-slate-200 px-6 py-4 no-print">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-xl font-semibold text-slate-900">
