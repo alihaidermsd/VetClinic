@@ -319,8 +319,8 @@ export function InventoryModule() {
                   <p className="text-sm text-slate-500">Total Items</p>
                   <p className="text-2xl font-bold">{stats.totalItems}</p>
                 </div>
-                <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                  <Package className="w-6 h-6 text-blue-600" />
+                <div className="w-12 h-12 bg-secondary rounded-lg flex items-center justify-center">
+                  <Package className="w-6 h-6 text-primary" />
                 </div>
               </div>
             </CardContent>

@@ -15,6 +15,11 @@ import {
   TrendingUp,
   Wallet,
   FileSpreadsheet,
+  Scale,
+  Printer,
+  ArrowDownLeft,
+  ArrowUpRight,
+  Landmark,
 } from 'lucide-react';
 import {
   getDailyReport,
@@ -25,9 +30,11 @@ import {
   getBillLedgerForRange,
   getAllTimeCompletedSummary,
   getMonthToDateReport,
+  getMonthlyDebitCreditReport,
 } from '@/lib/services/reportService';
 import { getClinicDateString } from '@/lib/services/tokenService';
-import type { BillReportRow } from '@/types';
+import { printMonthlyDebitCreditReport } from '@/lib/printDebitCreditReport';
+import type { BillReportRow, MonthlyDebitCreditReport } from '@/types';
 import { toast } from 'sonner';
 
 function formatInr(n: number): string {
@@ -46,6 +53,66 @@ function downloadCsv(filename: string, headers: string[], rows: Record<string, s
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function debitCreditToCsvRecords(r: MonthlyDebitCreditReport): Record<string, string | number>[] {
+  const out: Record<string, string | number>[] = [];
+  out.push({ section: 'SUMMARY', kind: '', ref: '', amount: '', detail: '', extra: '' });
+  out.push({
+    section: 'Credit total',
+    kind: '',
+    ref: '',
+    amount: r.credit_total,
+    detail: `${r.credit_payment_count} payments`,
+    extra: '',
+  });
+  out.push({
+    section: 'Debit total',
+    kind: '',
+    ref: '',
+    amount: r.debit_total,
+    detail: `${r.debit_payment_count} payouts`,
+    extra: '',
+  });
+  out.push({
+    section: 'Net position',
+    kind: '',
+    ref: '',
+    amount: r.net_position,
+    detail: 'credit - debit',
+    extra: '',
+  });
+  out.push({
+    section: 'Net billed (closed bills)',
+    kind: '',
+    ref: '',
+    amount: r.net_billed_closed_bills,
+    detail: r.month_label,
+    extra: '',
+  });
+  out.push({ section: 'CREDIT_LINES', kind: '', ref: '', amount: '', detail: '', extra: '' });
+  for (const line of r.credit_lines) {
+    out.push({
+      section: 'credit',
+      kind: line.payment_method,
+      ref: line.bill_code,
+      amount: line.amount,
+      detail: line.received_at,
+      extra: line.received_by_name,
+    });
+  }
+  out.push({ section: 'DEBIT_LINES', kind: '', ref: '', amount: '', detail: '', extra: '' });
+  for (const line of r.debit_lines) {
+    out.push({
+      section: 'debit',
+      kind: line.payment_method,
+      ref: line.staff_name,
+      amount: line.amount,
+      detail: line.paid_at,
+      extra: `${line.period_start}–${line.period_end}`,
+    });
+  }
+  return out;
 }
 
 function billRowsToCsvRecords(rows: BillReportRow[]): Record<string, string | number>[] {
@@ -190,19 +257,34 @@ export function ReportsModule() {
   const [medRange, setMedRange] = useState({ start: '', end: '' });
   const [medicineReport, setMedicineReport] = useState<any>(null);
 
+  const [dcMonth, setDcMonth] = useState(() => getClinicDateString().slice(0, 7));
+  const [dcReport, setDcReport] = useState<MonthlyDebitCreditReport | null>(() => {
+    const t = getClinicDateString();
+    const [y, m] = t.split('-').map(Number);
+    return getMonthlyDebitCreditReport(y, m);
+  });
+
   const refreshOverview = useCallback(() => {
     const d = dailyDate;
     setAllTime(getAllTimeCompletedSummary());
     setMtd(getMonthToDateReport());
     setDailyReport(getDailyReport(d));
     setDailyLedger(getBillLedgerForDay(d));
+    const [yy, mm] = dcMonth.split('-').map(Number);
+    if (yy && mm) setDcReport(getMonthlyDebitCreditReport(yy, mm));
     toast.success('Reports refreshed');
-  }, [dailyDate]);
+  }, [dailyDate, dcMonth]);
 
   useEffect(() => {
     setDailyReport(getDailyReport(dailyDate));
     setDailyLedger(getBillLedgerForDay(dailyDate));
   }, [dailyDate]);
+
+  useEffect(() => {
+    const [y, m] = dcMonth.split('-').map(Number);
+    if (!y || !m) return;
+    setDcReport(getMonthlyDebitCreditReport(y, m));
+  }, [dcMonth]);
 
   useEffect(() => {
     setDoctorReport(getDoctorReport());
@@ -281,6 +363,25 @@ export function ReportsModule() {
     toast.success('CSV downloaded');
   };
 
+  const exportDebitCreditCsv = () => {
+    if (!dcReport) {
+      toast.error('Load a month first');
+      return;
+    }
+    downloadCsv(
+      `animal-care-hospital-debit-credit-${dcReport.year}-${String(dcReport.month).padStart(2, '0')}.csv`,
+      ['section', 'kind', 'ref', 'amount', 'detail', 'extra'],
+      debitCreditToCsvRecords(dcReport)
+    );
+    toast.success('CSV downloaded');
+  };
+
+  const handlePrintDebitCredit = () => {
+    if (!dcReport) return;
+    const ok = printMonthlyDebitCreditReport(dcReport);
+    if (!ok) toast.error('Allow pop-ups to print');
+  };
+
   const exportAllTimeCsv = () => {
     const bills = getBillLedgerForRange('1970-01-01', '2999-12-31');
     const headers = [
@@ -318,21 +419,25 @@ export function ReportsModule() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-2 lg:grid-cols-4 h-auto p-1 gap-1">
+        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 p-1 sm:grid-cols-3 lg:grid-cols-5">
           <TabsTrigger value="overview" className="py-2.5">
-            <Wallet className="w-4 h-4 mr-1.5 hidden sm:inline" />
+            <Wallet className="mr-1.5 hidden h-4 w-4 sm:inline" />
             Overview
           </TabsTrigger>
           <TabsTrigger value="period" className="py-2.5">
-            <Calendar className="w-4 h-4 mr-1.5 hidden sm:inline" />
+            <Calendar className="mr-1.5 hidden h-4 w-4 sm:inline" />
             Period
           </TabsTrigger>
+          <TabsTrigger value="debit-credit" className="py-2.5">
+            <Scale className="mr-1.5 hidden h-4 w-4 sm:inline" />
+            Debit &amp; credit
+          </TabsTrigger>
           <TabsTrigger value="doctors" className="py-2.5">
-            <Users className="w-4 h-4 mr-1.5 hidden sm:inline" />
+            <Users className="mr-1.5 hidden h-4 w-4 sm:inline" />
             Doctors
           </TabsTrigger>
           <TabsTrigger value="medicines" className="py-2.5">
-            <Pill className="w-4 h-4 mr-1.5 hidden sm:inline" />
+            <Pill className="mr-1.5 hidden h-4 w-4 sm:inline" />
             Medicines
           </TabsTrigger>
         </TabsList>
@@ -342,7 +447,7 @@ export function ReportsModule() {
             <Card className="border-slate-200 shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-blue-600" />
+                  <TrendingUp className="w-4 h-4 text-primary" />
                   All time
                 </CardTitle>
                 <CardDescription>Completed or fully paid bills (cancelled excluded)</CardDescription>
@@ -370,7 +475,7 @@ export function ReportsModule() {
             <Card className="border-slate-200 shadow-sm lg:col-span-2">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-indigo-600" />
+                  <Calendar className="w-4 h-4 text-accent" />
                   Month to date
                 </CardTitle>
                 <CardDescription>
@@ -389,11 +494,11 @@ export function ReportsModule() {
             </Card>
           </div>
 
-          <Card className="border-blue-100 shadow-sm">
+          <Card className="border-primary/15 shadow-sm">
             <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
                 <CardTitle className="flex items-center gap-2 text-lg">
-                  <Calendar className="w-5 h-5 text-blue-600" />
+                  <Calendar className="w-5 h-5 text-primary" />
                   Daily report
                 </CardTitle>
                 <CardDescription>Pick any day — see totals, room split, payments, and each bill.</CardDescription>
@@ -650,6 +755,281 @@ export function ReportsModule() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="debit-credit" className="mt-6 space-y-6">
+          <div className="rounded-2xl border border-primary/15 bg-gradient-to-br from-secondary/25 via-background to-muted/40 p-1 shadow-sm">
+            <Card className="border-0 bg-card/95 shadow-none">
+              <CardHeader className="flex flex-col gap-4 border-b border-border/60 pb-6 sm:flex-row sm:items-end sm:justify-between">
+                <div className="space-y-1">
+                  <CardTitle className="flex items-center gap-2 text-xl">
+                    <Landmark className="h-6 w-6 text-primary" />
+                    Monthly debit &amp; credit
+                  </CardTitle>
+                  <CardDescription className="max-w-2xl text-sm leading-relaxed">
+                    <strong className="text-foreground">Credit</strong> is cash collected: every{' '}
+                    <strong>payment</strong> dated in the month (bills not cancelled).{' '}
+                    <strong className="text-foreground">Debit</strong> is cash paid out:{' '}
+                    <strong>salary</strong> payouts dated in the month. Net position = credit − debit.{' '}
+                    <strong>Net billed</strong> matches the Period report (closed bills). Collections can differ when
+                    payments fall in a different month than the bill was closed.
+                  </CardDescription>
+                </div>
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="dc-month" className="text-xs">
+                      Calendar month
+                    </Label>
+                    <Input
+                      id="dc-month"
+                      type="month"
+                      value={dcMonth}
+                      onChange={(e) => setDcMonth(e.target.value)}
+                      className="w-[11rem] font-medium"
+                    />
+                  </div>
+                  <Button type="button" variant="outline" size="sm" onClick={exportDebitCreditCsv} disabled={!dcReport}>
+                    <Download className="mr-2 h-4 w-4" />
+                    CSV
+                  </Button>
+                  <Button type="button" size="sm" onClick={handlePrintDebitCredit} disabled={!dcReport}>
+                    <Printer className="mr-2 h-4 w-4" />
+                    Print
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-8 pt-6">
+                {dcReport && (
+                  <>
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div className="group relative overflow-hidden rounded-2xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50 via-white to-emerald-50/50 p-5 shadow-sm ring-1 ring-emerald-900/5 transition hover:shadow-md">
+                        <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-emerald-400/15 blur-2xl" />
+                        <div className="relative flex items-start gap-3">
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-inner">
+                            <ArrowDownLeft className="h-6 w-6" strokeWidth={2.25} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-800/90">
+                              Credit — collections
+                            </p>
+                            <p className="mt-1 font-mono text-2xl font-bold tabular-nums text-emerald-900">
+                              Rs. {formatInr(dcReport.credit_total)}
+                            </p>
+                            <p className="mt-1 text-xs text-emerald-800/75">
+                              {dcReport.credit_payment_count} payment line
+                              {dcReport.credit_payment_count === 1 ? '' : 's'} · bill payments only
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="group relative overflow-hidden rounded-2xl border border-orange-200/90 bg-gradient-to-br from-orange-50 via-white to-amber-50/40 p-5 shadow-sm ring-1 ring-orange-900/5 transition hover:shadow-md">
+                        <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-orange-400/20 blur-2xl" />
+                        <div className="relative flex items-start gap-3">
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-600 text-white shadow-inner">
+                            <ArrowUpRight className="h-6 w-6" strokeWidth={2.25} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-orange-900/85">
+                              Debit — salary paid
+                            </p>
+                            <p className="mt-1 font-mono text-2xl font-bold tabular-nums text-orange-950">
+                              Rs. {formatInr(dcReport.debit_total)}
+                            </p>
+                            <p className="mt-1 text-xs text-orange-900/75">
+                              {dcReport.debit_payment_count} payout
+                              {dcReport.debit_payment_count === 1 ? '' : 's'} · from staff payroll
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="group relative overflow-hidden rounded-2xl border border-primary/25 bg-gradient-to-br from-primary/10 via-background to-accent/15 p-5 shadow-sm ring-1 ring-primary/10 transition hover:shadow-md">
+                        <div className="absolute -right-8 -top-8 h-28 w-28 rounded-full bg-primary/10 blur-2xl" />
+                        <div className="relative flex items-start gap-3">
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-inner">
+                            <TrendingUp className="h-6 w-6" strokeWidth={2.25} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary/90">
+                              Net cash position
+                            </p>
+                            <p className="mt-1 font-mono text-2xl font-bold tabular-nums text-primary">
+                              Rs. {formatInr(dcReport.net_position)}
+                            </p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {dcReport.month_label} · credit minus debit
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-primary/20 bg-muted/30 px-4 py-3 text-sm">
+                      <span className="text-muted-foreground">
+                        <strong className="text-foreground">Net billed (closed bills)</strong> this month (same as
+                        Period report)
+                      </span>
+                      <span className="font-mono text-base font-semibold tabular-nums text-foreground">
+                        Rs. {formatInr(dcReport.net_billed_closed_bills)}
+                      </span>
+                    </div>
+
+                    <div className="grid gap-6 xl:grid-cols-2">
+                      <div className="space-y-3">
+                        <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                          <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                          By payment method
+                        </h4>
+                        <div className="overflow-hidden rounded-xl border border-border bg-card">
+                          <table className="w-full text-sm">
+                            <thead className="bg-muted/60">
+                              <tr>
+                                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Method</th>
+                                <th className="px-3 py-2.5 text-right font-medium text-muted-foreground">Count</th>
+                                <th className="px-3 py-2.5 text-right font-medium text-muted-foreground">Amount</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {dcReport.credit_by_method.map((row) => (
+                                <tr key={row.payment_method} className="border-t border-border/80">
+                                  <td className="px-3 py-2 capitalize">{row.payment_method}</td>
+                                  <td className="px-3 py-2 text-right tabular-nums">{row.count}</td>
+                                  <td className="px-3 py-2 text-right font-medium tabular-nums text-emerald-800">
+                                    Rs. {formatInr(row.total_amount)}
+                                  </td>
+                                </tr>
+                              ))}
+                              {dcReport.credit_by_method.length === 0 && (
+                                <tr>
+                                  <td colSpan={3} className="px-3 py-8 text-center text-muted-foreground">
+                                    No collections this month.
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                          <span className="h-2 w-2 rounded-full bg-primary" />
+                          Reporting window
+                        </h4>
+                        <div className="rounded-xl border border-border bg-muted/20 p-4 text-sm leading-relaxed text-muted-foreground">
+                          <p>
+                            <strong className="text-foreground">{dcReport.month_label}</strong>
+                          </p>
+                          <p className="mt-2 font-mono text-xs">
+                            {dcReport.range_start} → {dcReport.range_end}
+                          </p>
+                          <p className="mt-3 text-xs">
+                            Figures are computed from the same SQLite tables as the dashboard:{' '}
+                            <code className="rounded bg-muted px-1 py-0.5 text-[11px]">payments</code> and{' '}
+                            <code className="rounded bg-muted px-1 py-0.5 text-[11px]">salary_payments</code>, with bill
+                            cancellation rules applied to credits.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <h4 className="text-sm font-semibold text-foreground">Credit — every payment line</h4>
+                      <div className="overflow-hidden rounded-xl border border-border">
+                        <div className="max-h-[min(22rem,45vh)] overflow-auto">
+                          <table className="w-full text-sm">
+                            <thead className="sticky top-0 z-10 bg-muted/90 backdrop-blur-sm">
+                              <tr>
+                                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Bill</th>
+                                <th className="px-3 py-2.5 text-right font-medium text-muted-foreground">Amount</th>
+                                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Method</th>
+                                <th className="hidden px-3 py-2.5 text-left font-medium text-muted-foreground lg:table-cell">
+                                  Received
+                                </th>
+                                <th className="hidden px-3 py-2.5 text-left font-medium text-muted-foreground xl:table-cell">
+                                  By
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {dcReport.credit_lines.map((r) => (
+                                <tr key={r.id} className="border-t border-border/70 hover:bg-muted/30">
+                                  <td className="px-3 py-2 font-mono text-xs font-medium">{r.bill_code}</td>
+                                  <td className="px-3 py-2 text-right tabular-nums text-emerald-800">
+                                    Rs. {formatInr(r.amount)}
+                                  </td>
+                                  <td className="px-3 py-2 capitalize">{r.payment_method}</td>
+                                  <td className="hidden whitespace-nowrap px-3 py-2 text-xs text-muted-foreground lg:table-cell">
+                                    {r.received_at ? new Date(r.received_at).toLocaleString() : '—'}
+                                  </td>
+                                  <td className="hidden px-3 py-2 text-xs xl:table-cell">{r.received_by_name}</td>
+                                </tr>
+                              ))}
+                              {dcReport.credit_lines.length === 0 && (
+                                <tr>
+                                  <td colSpan={5} className="px-3 py-10 text-center text-muted-foreground">
+                                    No payment lines in this month.
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <h4 className="text-sm font-semibold text-foreground">Debit — salary payouts</h4>
+                      <div className="overflow-hidden rounded-xl border border-border">
+                        <div className="max-h-[min(22rem,45vh)] overflow-auto">
+                          <table className="w-full text-sm">
+                            <thead className="sticky top-0 z-10 bg-muted/90 backdrop-blur-sm">
+                              <tr>
+                                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Staff</th>
+                                <th className="px-3 py-2.5 text-right font-medium text-muted-foreground">Amount</th>
+                                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Method</th>
+                                <th className="hidden px-3 py-2.5 text-left font-medium text-muted-foreground md:table-cell">
+                                  Paid at
+                                </th>
+                                <th className="hidden px-3 py-2.5 text-left font-medium text-muted-foreground lg:table-cell">
+                                  Period
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {dcReport.debit_lines.map((r) => (
+                                <tr key={r.id} className="border-t border-border/70 hover:bg-muted/30">
+                                  <td className="px-3 py-2 font-medium">{r.staff_name}</td>
+                                  <td className="px-3 py-2 text-right tabular-nums text-orange-900">
+                                    Rs. {formatInr(r.amount)}
+                                  </td>
+                                  <td className="px-3 py-2 capitalize">{r.payment_method}</td>
+                                  <td className="hidden whitespace-nowrap px-3 py-2 text-xs text-muted-foreground md:table-cell">
+                                    {r.paid_at ? new Date(r.paid_at).toLocaleString() : '—'}
+                                  </td>
+                                  <td className="hidden px-3 py-2 text-xs text-muted-foreground lg:table-cell">
+                                    {r.period_start} → {r.period_end}
+                                  </td>
+                                </tr>
+                              ))}
+                              {dcReport.debit_lines.length === 0 && (
+                                <tr>
+                                  <td colSpan={5} className="px-3 py-10 text-center text-muted-foreground">
+                                    No salary payouts recorded in this month.
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         <TabsContent value="doctors" className="space-y-4 mt-6">

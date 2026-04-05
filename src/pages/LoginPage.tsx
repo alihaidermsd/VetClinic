@@ -5,7 +5,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Stethoscope, Lock, User } from 'lucide-react';
+import { Lock, User } from 'lucide-react';
+import { BrandLogo } from '@/components/BrandLogo';
 
 export function LoginPage() {
   const [username, setUsername] = useState('');
@@ -18,17 +19,14 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-secondary/80 via-background to-muted flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <div
-            className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-full mb-4"
-            aria-label="Animal Care Hospital"
-          >
-            <Stethoscope className="w-8 h-8 text-white" />
+        <div className="mb-8 text-center">
+          <div className="mb-6 flex justify-center">
+            <BrandLogo variant="login" />
           </div>
-          <h1 className="text-3xl font-bold text-slate-900">Animal Care Hospital</h1>
-          <p className="text-slate-600 mt-2">Hospital management system</p>
+          <h1 className="text-3xl font-bold tracking-tight text-foreground">Animal Care Hospital</h1>
+          <p className="mt-2 text-muted-foreground">Hospital management system</p>
         </div>
 
         <Card>
@@ -86,15 +84,15 @@ export function LoginPage() {
               </Button>
             </form>
 
-            <div className="mt-6 p-4 bg-slate-50 rounded-lg text-sm text-slate-600">
-              <p className="font-medium mb-2">Demo Credentials:</p>
-              <p>Username: <code className="bg-slate-200 px-1 rounded">admin</code></p>
-              <p>Password: <code className="bg-slate-200 px-1 rounded">admin123</code></p>
+            <div className="mt-6 rounded-lg border border-border bg-muted/50 p-4 text-sm text-muted-foreground">
+              <p className="mb-2 font-medium text-foreground">Demo Credentials:</p>
+              <p>Username: <code className="rounded bg-muted px-1.5 py-0.5 text-foreground">admin</code></p>
+              <p>Password: <code className="rounded bg-muted px-1.5 py-0.5 text-foreground">admin123</code></p>
             </div>
           </CardContent>
         </Card>
 
-        <p className="text-center text-sm text-slate-500 mt-8">
+        <p className="mt-8 text-center text-sm text-muted-foreground">
           Offline-First Veterinary Clinic Management System
         </p>
       </div>

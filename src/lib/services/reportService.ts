@@ -6,6 +6,9 @@ import type {
   DoctorReport,
   PaymentMethod,
   BillReportRow,
+  MonthlyDebitCreditReport,
+  MonthlyDebitCreditCreditLine,
+  MonthlyDebitCreditDebitLine,
 } from '@/types';
 import { getClinicDateString, isTokenFromToday } from './tokenService';
 
@@ -21,6 +24,19 @@ function isDashboardCalendarDay(iso: string | undefined | null, clinicToday: str
 
 function normalizeStatus(s: unknown): string {
   return String(s ?? '').trim().toLowerCase();
+}
+
+function roundMoney(n: number): number {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+/** True if ISO timestamp falls on any calendar day within [start, end] (local or UTC day). */
+function isIsoInClosedRange(iso: string | undefined | null, start: string, end: string): boolean {
+  const parts = getYmdParts(iso);
+  if (!parts) return false;
+  return (
+    (parts.local >= start && parts.local <= end) || (parts.utc >= start && parts.utc <= end)
+  );
 }
 
 /**
@@ -469,9 +485,119 @@ export function getMedicineSalesReport(startDate?: string, endDate?: string) {
 // Get monthly report
 export function getMonthlyReport(year: number, month: number) {
   const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-  const endDate = `${year}-${String(month).padStart(2, '0')}-31`;
-  
+  const lastDay = new Date(year, month, 0).getDate();
+  const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
   return getDateRangeReport(startDate, endDate);
+}
+
+/**
+ * Monthly credit (cash in) vs debit (salary out).
+ * - Credit: sum of `payments.amount` dated in the month, only where the linked bill is not cancelled.
+ * - Debit: sum of `salary_payments.amount` with `paid_at` in the month.
+ * - Net billed: closed-bill revenue for the month (same attribution as Period report).
+ */
+export function getMonthlyDebitCreditReport(year: number, month: number): MonthlyDebitCreditReport {
+  const range_start = `${year}-${String(month).padStart(2, '0')}-01`;
+  const lastDay = new Date(year, month, 0).getDate();
+  const range_end = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  const month_label = new Date(year, month - 1, 1).toLocaleString('default', {
+    month: 'long',
+    year: 'numeric',
+  });
+
+  const bills = listTable('bills') as any[];
+  const billById = Object.fromEntries(bills.map((b) => [b.id, b]));
+
+  const payments = listTable('payments') as any[];
+  const creditLinesRaw: MonthlyDebitCreditCreditLine[] = [];
+
+  for (const p of payments) {
+    const bill = billById[p.bill_id];
+    if (!bill) continue;
+    if (normalizeStatus(bill.status) === 'cancelled') continue;
+    if (!isIsoInClosedRange(p.created_at, range_start, range_end)) continue;
+
+    creditLinesRaw.push({
+      id: Number(p.id),
+      bill_id: Number(p.bill_id),
+      bill_code: String(bill.bill_code ?? '—'),
+      amount: roundMoney(Number(p.amount) || 0),
+      payment_method: String(p.payment_method ?? 'cash'),
+      received_at: String(p.created_at ?? ''),
+      received_by_name: String(p.received_by_name ?? '—'),
+      transaction_id: p.transaction_id ?? null,
+      notes: p.notes ?? null,
+    });
+  }
+
+  creditLinesRaw.sort((a, b) => String(b.received_at).localeCompare(String(a.received_at)));
+
+  const methodMap = new Map<string, { total_amount: number; count: number }>();
+  let credit_total = 0;
+  for (const row of creditLinesRaw) {
+    credit_total += row.amount;
+    const m = String(row.payment_method || 'cash');
+    const cur = methodMap.get(m) || { total_amount: 0, count: 0 };
+    cur.total_amount = roundMoney(cur.total_amount + row.amount);
+    cur.count += 1;
+    methodMap.set(m, cur);
+  }
+  credit_total = roundMoney(credit_total);
+
+  const credit_by_method = Array.from(methodMap.entries())
+    .map(([payment_method, v]) => ({
+      payment_method,
+      total_amount: roundMoney(v.total_amount),
+      count: v.count,
+    }))
+    .sort((a, b) => b.total_amount - a.total_amount);
+
+  const users = listTable('users') as any[];
+  const userById = Object.fromEntries(users.map((u) => [u.id, u]));
+
+  const salaryRows = listTable('salary_payments') as any[];
+  const debit_lines: MonthlyDebitCreditDebitLine[] = [];
+
+  for (const sp of salaryRows) {
+    if (!isIsoInClosedRange(sp.paid_at, range_start, range_end)) continue;
+    const u = userById[sp.user_id];
+    debit_lines.push({
+      id: Number(sp.id),
+      user_id: Number(sp.user_id),
+      staff_name: String(u?.name ?? `User #${sp.user_id}`),
+      amount: roundMoney(Number(sp.amount) || 0),
+      paid_at: String(sp.paid_at ?? ''),
+      period_start: String(sp.period_start ?? ''),
+      period_end: String(sp.period_end ?? ''),
+      payment_method: String(sp.payment_method ?? 'cash'),
+      notes: sp.notes ?? null,
+    });
+  }
+
+  debit_lines.sort((a, b) => String(b.paid_at).localeCompare(String(a.paid_at)));
+
+  const debit_total = roundMoney(debit_lines.reduce((s, r) => s + r.amount, 0));
+
+  const rangeSummary = getDateRangeReport(range_start, range_end).summary;
+  const net_billed_closed_bills = roundMoney(Number(rangeSummary.net_revenue) || 0);
+
+  return {
+    year,
+    month,
+    month_label,
+    range_start,
+    range_end,
+    credit_total,
+    credit_payment_count: creditLinesRaw.length,
+    credit_by_method,
+    credit_lines: creditLinesRaw,
+    debit_total,
+    debit_payment_count: debit_lines.length,
+    debit_lines,
+    net_billed_closed_bills,
+    net_position: roundMoney(credit_total - debit_total),
+  };
 }
 
 // Get yearly report

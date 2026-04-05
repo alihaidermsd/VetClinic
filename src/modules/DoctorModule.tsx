@@ -278,7 +278,7 @@ export function DoctorModule() {
   const statusBadgeClass = (status: string) => {
     const styles: Record<string, string> = {
       waiting: 'bg-amber-100 text-amber-900 border-amber-200',
-      in_progress: 'bg-blue-100 text-blue-900 border-blue-200',
+      in_progress: 'bg-secondary text-primary border-primary/25',
       completed: 'bg-emerald-100 text-emerald-900 border-emerald-200',
       cancelled: 'bg-red-100 text-red-900 border-red-200',
     };
@@ -583,11 +583,11 @@ export function DoctorModule() {
       {/* Patient Details */}
       {currentToken && (
         <>
-          <Card className="bg-blue-50 border-blue-200">
+          <Card className="bg-secondary/60 border-primary/25">
             <CardContent className="p-4">
               <div className="flex items-center justify-between gap-4 flex-wrap">
                 <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center">
+                  <div className="w-12 h-12 bg-primary rounded-full flex items-center justify-center">
                     <User className="w-6 h-6 text-white" />
                   </div>
                   <div>
@@ -610,8 +610,8 @@ export function DoctorModule() {
                   </Badge>
                 </div>
               </div>
-              <div className="mt-4 pt-4 border-t border-blue-200 flex items-center gap-4">
-                <PawPrint className="w-5 h-5 text-blue-600" />
+              <div className="mt-4 pt-4 border-t border-primary/25 flex items-center gap-4">
+                <PawPrint className="w-5 h-5 text-primary" />
                 <div>
                   <p className="font-medium">{currentToken.animal?.name}</p>
                   <p className="text-sm text-slate-600">
@@ -746,7 +746,7 @@ export function DoctorModule() {
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-base">
-                    <Scan className="w-5 h-5 text-sky-700" />
+                    <Scan className="w-5 h-5 text-primary" />
                     X-Ray
                   </CardTitle>
                   <p className="text-sm text-slate-500">
@@ -983,7 +983,7 @@ export function DoctorModule() {
                                 Rs. {Number(currentBill.bill.total_amount || 0).toLocaleString('en-IN')}
                               </td>
                             </tr>
-                            <tr className="font-bold text-base text-blue-800">
+                            <tr className="font-bold text-base text-primary">
                               <td className="py-2" colSpan={2}>
                                 Patient total
                               </td>
@@ -1005,7 +1005,7 @@ export function DoctorModule() {
                         </span>
                         <span>
                           Patient total:{' '}
-                          <strong className="text-blue-800 text-base">
+                          <strong className="text-primary text-base">
                             Rs. {Number(currentBill.bill.final_amount || 0).toLocaleString('en-IN')}
                           </strong>
                         </span>
@@ -1037,7 +1037,7 @@ export function DoctorModule() {
                         key={room.value}
                         className={`flex items-center gap-3 rounded-lg border p-4 cursor-pointer transition-colors ${
                           referralTargets.has(room.value)
-                            ? 'border-blue-400 bg-blue-50'
+                            ? 'border-primary/45 bg-secondary/60'
                             : 'border-slate-200 hover:bg-slate-50'
                         } ${visitLocked ? 'opacity-60 pointer-events-none' : ''}`}
                       >
@@ -1135,7 +1135,7 @@ export function DoctorModule() {
                         onClick={() => openQueueRow(row)}
                         className={`w-full text-left rounded-lg border px-3 py-2.5 text-sm transition-colors ${
                           active
-                            ? 'border-blue-400 bg-blue-50'
+                            ? 'border-primary/45 bg-secondary/60'
                             : 'border-slate-200 bg-white hover:bg-slate-50'
                         }`}
                       >

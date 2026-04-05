@@ -145,7 +145,7 @@ export function ReceptionModule() {
   const getStatusBadge = (status: string) => {
     const styles: Record<string, string> = {
       waiting: 'bg-yellow-100 text-yellow-800',
-      in_progress: 'bg-blue-100 text-blue-800',
+      in_progress: 'bg-secondary text-primary',
       completed: 'bg-green-100 text-green-800',
       cancelled: 'bg-red-100 text-red-800',
     };
@@ -155,10 +155,10 @@ export function ReceptionModule() {
   return (
     <div className="flex flex-col xl:flex-row gap-6 max-w-6xl mx-auto p-4 items-start">
       <div className="flex-1 min-w-0 space-y-6">
-        <Card className="border-2 border-blue-100 shadow-sm">
+        <Card className="border-2 border-primary/15 shadow-sm">
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-xl">
-            <Ticket className="w-6 h-6 text-blue-600" />
+            <Ticket className="w-6 h-6 text-primary" />
             New queue token
           </CardTitle>
           <p className="text-sm text-slate-500 font-normal">
@@ -185,7 +185,7 @@ export function ReceptionModule() {
           <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
             <div className="space-y-2">
               <Label htmlFor="pet" className="flex items-center gap-2">
-                <PawPrint className="w-4 h-4 text-blue-600" />
+                <PawPrint className="w-4 h-4 text-primary" />
                 Pet name
               </Label>
               <Input

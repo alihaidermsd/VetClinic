@@ -383,9 +383,9 @@ export function BillingModule() {
   const getStatusBadge = (status: string) => {
     const styles: Record<string, string> = {
       pending: 'bg-yellow-100 text-yellow-800',
-      partial: 'bg-blue-100 text-blue-800',
+      partial: 'bg-secondary text-primary',
       paid: 'bg-green-100 text-green-800',
-      active: 'bg-blue-100 text-blue-800',
+      active: 'bg-secondary text-primary',
       completed: 'bg-green-100 text-green-800',
       cancelled: 'bg-red-100 text-red-800',
     };
@@ -642,8 +642,8 @@ export function BillingModule() {
       <div className="flex-1 min-w-0">
       {/* Bill Details */}
       {!currentBill && (
-        <Card className="border-2 border-blue-200">
-          <CardHeader className="bg-blue-50">
+        <Card className="border-2 border-primary/25">
+          <CardHeader className="bg-secondary/60">
             <CardTitle className="flex items-center gap-2">
               <Receipt className="w-5 h-5" />
               Bill Details
@@ -657,8 +657,8 @@ export function BillingModule() {
         </Card>
       )}
       {currentBill && (
-        <Card className="border-2 border-blue-200">
-          <CardHeader className="bg-blue-50">
+        <Card className="border-2 border-primary/25">
+          <CardHeader className="bg-secondary/60">
             <div className="flex items-center justify-between">
               <CardTitle className="flex items-center gap-2">
                 <Receipt className="w-5 h-5" />

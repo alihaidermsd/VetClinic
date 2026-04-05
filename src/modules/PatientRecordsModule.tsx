@@ -132,7 +132,7 @@ export function PatientRecordsModule() {
                     type="button"
                     onClick={() => selectPatient(row.patient)}
                     className={`w-full text-left rounded-lg border px-3 py-2.5 text-sm transition-colors ${
-                      active ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'
+                      active ? 'border-primary/45 bg-secondary/60' : 'border-slate-200 hover:bg-slate-50'
                     }`}
                   >
                     <p className="font-semibold text-slate-900">{row.patient.owner_name}</p>

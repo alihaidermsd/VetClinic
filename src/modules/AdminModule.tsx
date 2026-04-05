@@ -690,8 +690,8 @@ export function AdminModule() {
                 <Card>
                   <CardContent className="p-6">
                     <div className="flex items-center gap-4 mb-4">
-                      <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                        <Download className="w-6 h-6 text-blue-600" />
+                      <div className="w-12 h-12 bg-secondary rounded-lg flex items-center justify-center">
+                        <Download className="w-6 h-6 text-primary" />
                       </div>
                       <div>
                         <h4 className="font-semibold">Export Database</h4>

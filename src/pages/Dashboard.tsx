@@ -32,6 +32,7 @@ import { DashboardHome } from '@/modules/DashboardHome';
 import { RoleDashboardHome, type RoleDashboardLink } from '@/modules/RoleDashboardHome';
 import { getDashboardStats } from '@/lib/services/reportService';
 import { toast } from 'sonner';
+import { BrandLogo } from '@/components/BrandLogo';
 
 type ModuleType =
   | 'dashboard'
@@ -309,29 +310,23 @@ export function Dashboard() {
   };
 
   return (
-    <div className="dashboard-root min-h-screen bg-slate-50 flex">
-      <div className="print-only print-page-brand w-full max-w-[220px] mx-auto py-3 text-center">
-        <img
-          src={`${import.meta.env.BASE_URL}logo.png`}
-          alt=""
-          className="max-h-20 w-auto mx-auto object-contain"
-        />
+    <div className="dashboard-root flex min-h-screen bg-background">
+      <div className="print-only print-page-brand w-full max-w-[220px] mx-auto py-3">
+        <BrandLogo variant="print" alt="" />
       </div>
 
       {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-slate-200 flex flex-col no-print">
+      <aside className="flex w-64 flex-col border-r border-border bg-card no-print shadow-[1px_0_0_rgba(94,48,85,0.04)]">
         {/* Logo — links to dashboard */}
-        <div className="p-4 border-b border-slate-200">
+        <div className="p-4 border-b border-border bg-muted/20">
           <a
             href={hashHrefForModule('dashboard')}
-            className="flex flex-col gap-1 rounded-lg p-1 -m-1 hover:bg-slate-50 transition-colors no-underline text-inherit outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+            className="group flex flex-col rounded-xl p-1 -m-1 transition-colors no-underline text-inherit outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 hover:bg-muted/40"
           >
-            <img
-              src={`${import.meta.env.BASE_URL}logo.png`}
-              alt="Animal Care Hospital — go to dashboard"
-              className="w-full max-h-[72px] object-contain object-left"
-            />
-            <p className="text-xs text-slate-500">Management system</p>
+            <BrandLogo variant="sidebar" alt="Animal Care Hospital — go to dashboard" />
+            <p className="mt-3 text-center text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+              Management system
+            </p>
           </a>
         </div>
 
@@ -347,7 +342,7 @@ export function Dashboard() {
                 href={hashHrefForModule(item.id)}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors no-underline ${
                   activeModule === item.id
-                    ? 'bg-blue-50 text-blue-700'
+                    ? 'bg-secondary/60 text-primary'
                     : 'text-slate-600 hover:bg-slate-100'
                 }`}
               >
@@ -384,7 +379,7 @@ export function Dashboard() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
-        <header className="bg-white border-b border-slate-200 px-6 py-4 no-print">
+        <header className="border-b border-border bg-card px-6 py-4 no-print">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-xl font-semibold text-slate-900">

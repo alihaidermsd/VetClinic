@@ -60,7 +60,7 @@ export function DashboardHome({ stats, onRefresh }: DashboardHomeProps) {
   const getStatusBadge = (status: string) => {
     const styles: Record<string, string> = {
       waiting: 'bg-yellow-100 text-yellow-800',
-      in_progress: 'bg-blue-100 text-blue-800',
+      in_progress: 'bg-secondary text-primary',
       completed: 'bg-green-100 text-green-800',
       cancelled: 'bg-red-100 text-red-800',
       pending: 'bg-orange-100 text-orange-800',
@@ -80,8 +80,8 @@ export function DashboardHome({ stats, onRefresh }: DashboardHomeProps) {
                 <p className="text-sm text-slate-500">Today's Tokens</p>
                 <p className="text-2xl font-bold text-slate-900">{stats?.today_tokens || 0}</p>
               </div>
-              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                <Users className="w-6 h-6 text-blue-600" />
+              <div className="w-12 h-12 bg-secondary rounded-lg flex items-center justify-center">
+                <Users className="w-6 h-6 text-primary" />
               </div>
             </div>
           </CardContent>

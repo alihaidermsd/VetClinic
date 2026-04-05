@@ -354,6 +354,54 @@ export interface BillReportRow {
   animal_name: string;
 }
 
+/** One incoming payment row for monthly debit/credit (cash collected). */
+export interface MonthlyDebitCreditCreditLine {
+  id: number;
+  bill_id: number;
+  bill_code: string;
+  amount: number;
+  payment_method: string;
+  received_at: string;
+  received_by_name: string;
+  transaction_id?: string | null;
+  notes?: string | null;
+}
+
+/** One salary payout row for monthly debit/credit. */
+export interface MonthlyDebitCreditDebitLine {
+  id: number;
+  user_id: number;
+  staff_name: string;
+  amount: number;
+  paid_at: string;
+  period_start: string;
+  period_end: string;
+  payment_method: string;
+  notes?: string | null;
+}
+
+/** Monthly cash-basis credit vs debit, aligned with dashboard payment and payroll logic. */
+export interface MonthlyDebitCreditReport {
+  year: number;
+  month: number;
+  month_label: string;
+  range_start: string;
+  range_end: string;
+  /** Sum of bill payment amounts received in this month (non-cancelled bills only). */
+  credit_total: number;
+  credit_payment_count: number;
+  credit_by_method: { payment_method: string; total_amount: number; count: number }[];
+  credit_lines: MonthlyDebitCreditCreditLine[];
+  /** Sum of salary payouts with paid_at in this month. */
+  debit_total: number;
+  debit_payment_count: number;
+  debit_lines: MonthlyDebitCreditDebitLine[];
+  /** Net billed from closed bills in this month (same rules as Period report). */
+  net_billed_closed_bills: number;
+  /** credit_total − debit_total */
+  net_position: number;
+}
+
 // Form Types
 export interface PatientFormData {
   owner_name: string;

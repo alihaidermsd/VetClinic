@@ -35,16 +35,16 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: hsl(312 18% 94%);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: hsl(312 20% 72%);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: hsl(81 22% 42%);
 }
 
 /* Token number animation */
@@ -91,7 +91,7 @@ textarea:focus,
 select:focus {
   outline: none;
   ring: 2px;
-  ring-color: #3b82f6;
+  ring-color: hsl(312 32.4% 27.8%);
 }
 
 /* Button transitions */
@@ -126,8 +126,8 @@ td {
 
 /* Loading spinner */
 .spinner {
-  border: 3px solid #f3f4f6;
-  border-top: 3px solid #3b82f6;
+  border: 3px solid hsl(312 12% 92%);
+  border-top: 3px solid hsl(312 32.4% 27.8%);
   border-radius: 50%;
   width: 24px;
   height: 24px;
@@ -161,10 +161,3 @@ td {
   }
 }
 
-/* Color scheme for dark mode support */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-  }
-}

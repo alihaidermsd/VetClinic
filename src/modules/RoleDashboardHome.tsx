@@ -85,8 +85,8 @@ function StatCard({
 function ActivityBars({ day, week, month }: { day: number; week: number; month: number }) {
   const max = Math.max(day, week, month, 1);
   const rows = [
-    { label: 'Today', value: day, className: 'bg-blue-500' },
-    { label: 'This week', value: week, className: 'bg-indigo-500' },
+    { label: 'Today', value: day, className: 'bg-primary' },
+    { label: 'This week', value: week, className: 'bg-accent' },
     { label: 'This month', value: month, className: 'bg-violet-500' },
   ];
   return (
@@ -137,7 +137,7 @@ export function RoleDashboardHome({ userId, role, userName, roleLabel, links }: 
 
   return (
     <div className="space-y-8 max-w-5xl">
-      <div className="rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900 text-white p-6 sm:p-8 shadow-lg">
+      <div className="rounded-2xl bg-gradient-to-br from-[#2a1826] via-[#1e121b] to-primary text-white p-6 sm:p-8 shadow-lg">
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div className="flex items-start gap-4">
             <div className="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur flex items-center justify-center shrink-0">
@@ -147,7 +147,7 @@ export function RoleDashboardHome({ userId, role, userName, roleLabel, links }: 
               <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
                 Hello{userName ? `, ${userName}` : ''}
               </h1>
-              <p className="text-blue-100/90 text-sm mt-1">{roleLabel}</p>
+              <p className="text-primary-foreground/90 text-sm mt-1">{roleLabel}</p>
               {payload && (
                 <p className="text-slate-300 text-sm mt-3 max-w-xl leading-relaxed">{payload.subtext}</p>
               )}
@@ -175,7 +175,7 @@ export function RoleDashboardHome({ userId, role, userName, roleLabel, links }: 
         <>
           <div>
             <h2 className="text-lg font-semibold text-slate-900 flex items-center gap-2 mb-4">
-              <Shield className="w-5 h-5 text-blue-600" />
+              <Shield className="w-5 h-5 text-primary" />
               {payload.headline}
             </h2>
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
@@ -313,7 +313,7 @@ export function RoleDashboardHome({ userId, role, userName, roleLabel, links }: 
         <>
           <div>
             <h2 className="text-lg font-semibold text-slate-900 flex items-center gap-2 mb-1">
-              <TrendingUp className="w-5 h-5 text-blue-600" />
+              <TrendingUp className="w-5 h-5 text-primary" />
               {payload.headline}
             </h2>
             <p className="text-sm text-slate-500 mb-4">Daily, weekly, and monthly totals (your sign-in only).</p>
@@ -325,7 +325,7 @@ export function RoleDashboardHome({ userId, role, userName, roleLabel, links }: 
                 totals={payload.day}
                 countLabel={payload.countLabel}
                 billsLabel={payload.mode === 'payments' ? 'Bills paid' : 'Bills'}
-                accent="border-l-4 border-l-blue-500"
+                accent="border-l-4 border-l-primary"
               />
               <StatCard
                 title="This week"
@@ -333,7 +333,7 @@ export function RoleDashboardHome({ userId, role, userName, roleLabel, links }: 
                 totals={payload.week}
                 countLabel={payload.countLabel}
                 billsLabel={payload.mode === 'payments' ? 'Bills paid' : 'Bills'}
-                accent="border-l-4 border-l-indigo-500"
+                accent="border-l-4 border-l-accent"
               />
               <StatCard
                 title="This month"
@@ -440,16 +440,16 @@ export function RoleDashboardHome({ userId, role, userName, roleLabel, links }: 
             <li key={id}>
               <a
                 href={href}
-                className="flex items-center gap-4 rounded-xl border border-slate-200 bg-white p-4 no-underline transition-colors hover:border-blue-300 hover:bg-blue-50/50 group shadow-sm"
+                className="flex items-center gap-4 rounded-xl border border-slate-200 bg-white p-4 no-underline transition-colors hover:border-primary/35 hover:bg-secondary/60/50 group shadow-sm"
               >
-                <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center group-hover:bg-blue-100">
-                  <Icon className="w-5 h-5 text-slate-700 group-hover:text-blue-700" />
+                <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center group-hover:bg-secondary">
+                  <Icon className="w-5 h-5 text-slate-700 group-hover:text-primary" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-slate-900">{label}</p>
                   <p className="text-xs text-slate-500 mt-0.5">Open</p>
                 </div>
-                <ArrowRight className="w-5 h-5 text-slate-400 shrink-0 group-hover:text-blue-600" />
+                <ArrowRight className="w-5 h-5 text-slate-400 shrink-0 group-hover:text-primary" />
               </a>
             </li>
           ))}
