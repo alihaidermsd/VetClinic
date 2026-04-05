@@ -138,7 +138,7 @@ export function hasPermission(userRole: UserRole, permission: string): boolean {
     xray_operator: ['xray', 'add_charges', 'view_bills', 'patient_records'],
     surgery_operator: ['surgery', 'add_charges', 'view_bills', 'patient_records'],
     pharmacy: ['pharmacy', 'inventory', 'add_charges', 'view_bills', 'patient_records'],
-    accountant: ['billing', 'reports', 'view_bills'],
+    accountant: ['billing', 'reports', 'view_bills', 'staff'],
   };
   
   const userPermissions = permissions[userRole] || [];

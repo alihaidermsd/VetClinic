@@ -13,6 +13,10 @@ import {
   Package,
   Stethoscope,
   Shield,
+  CalendarCheck,
+  Wallet,
+  Banknote,
+  TrendingDown,
 } from 'lucide-react';
 import type { UserRole } from '@/types';
 import {
@@ -212,6 +216,95 @@ export function RoleDashboardHome({ userId, role, userName, roleLabel, links }: 
                 </CardContent>
               </Card>
             </div>
+            <h3 className="text-sm font-medium text-slate-500 uppercase tracking-wide mt-8 mb-3 flex items-center gap-2">
+              <Banknote className="w-4 h-4" />
+              Income &amp; salary (clinic)
+            </h3>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <Card className="border-slate-200 border-l-4 border-l-green-500">
+                <CardContent className="p-4">
+                  <p className="text-xs text-slate-500">Today&apos;s revenue (gross)</p>
+                  <p className="text-xl font-bold text-green-700 mt-1 tabular-nums">
+                    {formatInr(payload.today_revenue_gross)}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card className="border-slate-200 border-l-4 border-l-rose-500">
+                <CardContent className="p-4">
+                  <p className="text-xs text-slate-500 flex items-center gap-1">
+                    <TrendingDown className="w-3.5 h-3.5" /> Salary paid today
+                  </p>
+                  <p className="text-xl font-bold text-rose-700 mt-1 tabular-nums">
+                    {formatInr(payload.today_salary_paid)}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card className="border-slate-200 border-l-4 border-l-emerald-600">
+                <CardContent className="p-4">
+                  <p className="text-xs text-slate-500">Net today</p>
+                  <p
+                    className={`text-xl font-bold mt-1 tabular-nums ${
+                      payload.today_net_income >= 0 ? 'text-emerald-800' : 'text-red-600'
+                    }`}
+                  >
+                    {formatInr(payload.today_net_income)}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card className="border-slate-200 border-l-4 border-l-violet-500">
+                <CardContent className="p-4">
+                  <p className="text-xs text-slate-500">Staff salary (this month)</p>
+                  <p className="text-xl font-bold text-violet-900 mt-1 tabular-nums">
+                    {formatInr(payload.month_salary_paid)}
+                  </p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">By payment date</p>
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card className="mt-6 border-slate-200 border-l-4 border-l-teal-500">
+              <CardHeader className="pb-2 pt-4 px-4">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <CalendarCheck className="w-5 h-5 text-teal-600" />
+                  Your attendance &amp; salary
+                </CardTitle>
+                <p className="text-sm text-slate-500 font-normal">{payload.selfHr.monthLabel}</p>
+              </CardHeader>
+              <CardContent className="px-4 pb-4 pt-0 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
+                  <p className="text-xs text-slate-500">Today ({payload.selfHr.todayDate})</p>
+                  <p className="text-sm font-semibold capitalize mt-1 text-slate-900">
+                    {payload.selfHr.todayAttendance === 'unmarked'
+                      ? 'Not marked'
+                      : String(payload.selfHr.todayAttendance).replace('_', ' ')}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Present units (month)</p>
+                  <p className="text-lg font-semibold tabular-nums">
+                    {payload.selfHr.presentUnitsThisMonth}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 flex items-center gap-1">
+                    <Wallet className="w-3.5 h-3.5" /> Monthly salary
+                  </p>
+                  <p className="text-lg font-semibold text-slate-900 tabular-nums">
+                    {formatInr(payload.selfHr.monthlySalary)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Payroll this month</p>
+                  {payload.selfHr.salaryPaidThisMonth ? (
+                    <p className="text-lg font-semibold text-green-700">
+                      Paid · {formatInr(payload.selfHr.salaryPaidAmountThisMonth)}
+                    </p>
+                  ) : (
+                    <p className="text-lg font-semibold text-amber-700">Unpaid</p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
           </div>
         </>
       )}
@@ -259,6 +352,48 @@ export function RoleDashboardHome({ userId, role, userName, roleLabel, links }: 
                   week={payload.week.count}
                   month={payload.month.count}
                 />
+              </CardContent>
+            </Card>
+
+            <Card className="mt-4 border-slate-200 border-l-4 border-l-teal-500">
+              <CardHeader className="pb-2 pt-4 px-4">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <CalendarCheck className="w-5 h-5 text-teal-600" />
+                  Your attendance &amp; salary
+                </CardTitle>
+                <p className="text-sm text-slate-500 font-normal">{payload.hr.monthLabel}</p>
+              </CardHeader>
+              <CardContent className="px-4 pb-4 pt-0 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
+                  <p className="text-xs text-slate-500">Today ({payload.hr.todayDate})</p>
+                  <p className="text-sm font-semibold capitalize mt-1 text-slate-900">
+                    {payload.hr.todayAttendance === 'unmarked'
+                      ? 'Not marked'
+                      : String(payload.hr.todayAttendance).replace('_', ' ')}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Present units (month)</p>
+                  <p className="text-lg font-semibold tabular-nums">{payload.hr.presentUnitsThisMonth}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 flex items-center gap-1">
+                    <Wallet className="w-3.5 h-3.5" /> Monthly salary
+                  </p>
+                  <p className="text-lg font-semibold text-slate-900 tabular-nums">
+                    {formatInr(payload.hr.monthlySalary)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Payroll this month</p>
+                  {payload.hr.salaryPaidThisMonth ? (
+                    <p className="text-lg font-semibold text-green-700">
+                      Paid · {formatInr(payload.hr.salaryPaidAmountThisMonth)}
+                    </p>
+                  ) : (
+                    <p className="text-lg font-semibold text-amber-700">Unpaid</p>
+                  )}
+                </div>
               </CardContent>
             </Card>
           </div>

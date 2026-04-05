@@ -30,6 +30,7 @@ export function createUser(userData: {
   role: UserRole;
   room_id?: number | null;
   is_active: boolean;
+  monthly_salary?: number;
 }): User {
   const username = userData.username.trim();
   const name = userData.name.trim();
@@ -48,8 +49,10 @@ export function createUser(userData: {
   }
 
   const hashedPassword = hashPassword(userData.password);
+  const salary = Number(userData.monthly_salary);
+  const monthlySalary = Number.isFinite(salary) && salary >= 0 ? salary : 0;
   const result = run(
-    'INSERT INTO users (username, password, name, role, room_id, is_active) VALUES (?, ?, ?, ?, ?, ?)',
+    'INSERT INTO users (username, password, name, role, room_id, is_active, monthly_salary) VALUES (?, ?, ?, ?, ?, ?, ?)',
     [
       username,
       hashedPassword,
@@ -57,12 +60,13 @@ export function createUser(userData: {
       userData.role,
       userData.room_id != null && userData.room_id > 0 ? userData.room_id : null,
       userData.is_active ? 1 : 0,
+      monthlySalary,
     ]
   );
   return getUserById(result.lastInsertRowid) as User;
 }
 
-export type UserUpdateInput = Partial<Pick<User, 'name' | 'role' | 'is_active' | 'username'>> & {
+export type UserUpdateInput = Partial<Pick<User, 'name' | 'role' | 'is_active' | 'username' | 'monthly_salary'>> & {
   /** Pass `null` to clear assigned room */
   room_id?: number | null;
   /** Plain-text new password (will be hashed) */
@@ -108,6 +112,14 @@ export function updateUser(id: number, updates: UserUpdateInput): User | null {
   if (updates.is_active !== undefined) {
     sets.push('is_active = ?');
     values.push(updates.is_active ? 1 : 0);
+  }
+  if (updates.monthly_salary !== undefined) {
+    const s = Number(updates.monthly_salary);
+    if (!Number.isFinite(s) || s < 0) {
+      throw new Error('Monthly salary must be a non-negative number');
+    }
+    sets.push('monthly_salary = ?');
+    values.push(s);
   }
   if (updates.password !== undefined && updates.password.length > 0) {
     if (updates.password.length < 4) {

@@ -73,6 +73,34 @@ export function createInventoryItem(data: Omit<InventoryItem, 'id' | 'created_at
   return getInventoryItemById(result.lastInsertRowid) as InventoryItem;
 }
 
+export type BulkCreateResult = { created: number; failed: { index: number; message: string }[] };
+
+/** Insert many items; each successful row is saved immediately. */
+export function createInventoryItemsBulk(
+  items: Omit<InventoryItem, 'id' | 'created_at' | 'updated_at'>[]
+): BulkCreateResult {
+  let created = 0;
+  const failed: { index: number; message: string }[] = [];
+  items.forEach((item, index) => {
+    try {
+      const name = String(item.name ?? '').trim();
+      if (!name) {
+        failed.push({ index, message: 'Missing name' });
+        return;
+      }
+      createInventoryItem({
+        ...item,
+        name,
+        is_active: item.is_active !== false,
+      });
+      created++;
+    } catch (e) {
+      failed.push({ index, message: e instanceof Error ? e.message : String(e) });
+    }
+  });
+  return { created, failed };
+}
+
 // Update inventory item
 export function updateInventoryItem(id: number, updates: Partial<InventoryItem>): InventoryItem | null {
   const sets: string[] = [];

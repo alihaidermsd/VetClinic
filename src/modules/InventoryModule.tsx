@@ -14,19 +14,34 @@ import {
   AlertTriangle,
   TrendingUp,
   Edit,
-  Trash2
+  Trash2,
+  Upload,
+  FileSpreadsheet,
+  ImageIcon,
+  Download,
 } from 'lucide-react';
 import { 
   getAllInventory, 
   getLowStockItems, 
   createInventoryItem, 
+  createInventoryItemsBulk,
   updateInventoryItem,
   addStock,
   deleteInventoryItem,
   getInventoryStats
 } from '@/lib/services/inventoryService';
+import {
+  parsePastedInventoryText,
+  parseImportedGrid,
+  parseXlsxFileToGrid,
+  parseTextToGrid,
+  INVENTORY_IMPORT_TEMPLATE_CSV,
+  type BulkImportDraft,
+} from '@/lib/inventoryImport';
 import type { InventoryCategory } from '@/types';
 import { toast } from 'sonner';
+import { Textarea } from '@/components/ui/textarea';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 const CATEGORIES: { value: InventoryCategory; label: string }[] = [
   { value: 'medicine', label: 'Medicine' },
@@ -43,6 +58,14 @@ export function InventoryModule() {
   const [searchTerm, setSearchTerm] = useState('');
   const [editingItem, setEditingItem] = useState<any>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
+  const [showBulkDialog, setShowBulkDialog] = useState(false);
+  const [bulkTab, setBulkTab] = useState('paste');
+  const [bulkPasteText, setBulkPasteText] = useState('');
+  const [bulkDefaultCategory, setBulkDefaultCategory] = useState<InventoryCategory>('medicine');
+  const [bulkPreview, setBulkPreview] = useState<BulkImportDraft[]>([]);
+  const [bulkSkipped, setBulkSkipped] = useState<{ row: number; reason: string }[]>([]);
+  const [bulkFileLoading, setBulkFileLoading] = useState(false);
+  const [bulkOcrLoading, setBulkOcrLoading] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -159,6 +182,117 @@ export function InventoryModule() {
     }
   };
 
+  const resetBulkImport = () => {
+    setBulkPasteText('');
+    setBulkPreview([]);
+    setBulkSkipped([]);
+    setBulkTab('paste');
+  };
+
+  const downloadImportTemplate = () => {
+    const blob = new Blob([INVENTORY_IMPORT_TEMPLATE_CSV], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'inventory-import-template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('Template downloaded');
+  };
+
+  const runBulkPreviewFromText = (text: string) => {
+    const { items, skipped } = parsePastedInventoryText(text, bulkDefaultCategory);
+    setBulkPreview(items);
+    setBulkSkipped(skipped);
+    if (items.length === 0) {
+      toast.error('No rows found. Use a header row (name, stock, …) or one item per line.');
+    } else {
+      toast.success(`${items.length} row(s) ready to import`);
+    }
+  };
+
+  const handleBulkFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const lower = file.name.toLowerCase();
+    setBulkFileLoading(true);
+    try {
+      let grid: string[][];
+      if (lower.endsWith('.csv')) {
+        const text = await file.text();
+        grid = parseTextToGrid(text);
+      } else if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
+        grid = await parseXlsxFileToGrid(file);
+      } else {
+        toast.error('Please choose a .csv, .xlsx, or .xls file');
+        return;
+      }
+      const { items, skipped } = parseImportedGrid(grid, bulkDefaultCategory);
+      setBulkPreview(items);
+      setBulkSkipped(skipped);
+      if (items.length === 0) {
+        toast.error('No rows found in file');
+      } else {
+        toast.success(`${items.length} row(s) loaded from file`);
+      }
+    } catch {
+      toast.error('Could not read that file');
+    } finally {
+      setBulkFileLoading(false);
+    }
+  };
+
+  const handleBulkImageOcr = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !file.type.startsWith('image/')) return;
+    setBulkOcrLoading(true);
+    try {
+      const { createWorker } = await import('tesseract.js');
+      const worker = await createWorker('eng');
+      const {
+        data: { text },
+      } = await worker.recognize(file);
+      await worker.terminate();
+      setBulkPasteText(text);
+      setBulkTab('paste');
+      toast.success('Text extracted — clean up lines if needed, then Preview import');
+    } catch {
+      toast.error('OCR failed. Try a sharper photo, or copy from Excel / Google Sheets and paste.');
+    } finally {
+      setBulkOcrLoading(false);
+    }
+  };
+
+  const confirmBulkImport = () => {
+    if (bulkPreview.length === 0) {
+      toast.error('Nothing to import — paste, upload, or preview first');
+      return;
+    }
+    const payload = bulkPreview.map((d) => ({
+      name: d.name,
+      category: d.category,
+      description: d.description?.trim() || undefined,
+      stock_quantity: d.stock_quantity,
+      min_stock_level: d.min_stock_level,
+      cost_price: d.cost_price,
+      selling_price: d.selling_price,
+      supplier: d.supplier?.trim() || undefined,
+      expiry_date: d.expiry_date?.trim() || undefined,
+      is_active: true as const,
+    }));
+    const { created, failed } = createInventoryItemsBulk(payload);
+    if (failed.length) {
+      toast.warning(`Added ${created} item(s). ${failed.length} row(s) failed.`);
+    } else {
+      toast.success(`Added ${created} item(s)`);
+    }
+    setShowBulkDialog(false);
+    resetBulkImport();
+    loadData();
+  };
+
   const openEditDialog = (item: any) => {
     setEditingItem(item);
     setFormData({
@@ -246,8 +380,161 @@ export function InventoryModule() {
         {/* All Items Tab */}
         <TabsContent value="all" className="space-y-4">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
               <CardTitle>Inventory Items</CardTitle>
+              <div className="flex flex-wrap gap-2">
+              <Dialog
+                open={showBulkDialog}
+                onOpenChange={(open) => {
+                  setShowBulkDialog(open);
+                  if (!open) resetBulkImport();
+                }}
+              >
+                <DialogTrigger asChild>
+                  <Button variant="secondary">
+                    <FileSpreadsheet className="w-4 h-4 mr-2" />
+                    Bulk import
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
+                  <DialogHeader>
+                    <DialogTitle>Bulk add inventory</DialogTitle>
+                  </DialogHeader>
+                  <p className="text-sm text-muted-foreground">
+                    Import many items from Excel, a CSV file, pasted rows, or text extracted from a photo.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Label className="text-xs shrink-0">Default category (when not in sheet)</Label>
+                    <Select
+                      value={bulkDefaultCategory}
+                      onValueChange={(v: InventoryCategory) => setBulkDefaultCategory(v)}
+                    >
+                      <SelectTrigger className="w-[160px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CATEGORIES.map((cat) => (
+                          <SelectItem key={cat.value} value={cat.value}>
+                            {cat.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button type="button" variant="outline" size="sm" onClick={downloadImportTemplate}>
+                      <Download className="w-4 h-4 mr-1" />
+                      CSV template
+                    </Button>
+                  </div>
+                  <Tabs value={bulkTab} onValueChange={setBulkTab} className="flex-1 min-h-0 flex flex-col gap-2">
+                    <TabsList className="grid w-full grid-cols-3">
+                      <TabsTrigger value="paste">Paste</TabsTrigger>
+                      <TabsTrigger value="file">Excel / CSV</TabsTrigger>
+                      <TabsTrigger value="photo">Photo</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="paste" className="space-y-2 mt-2">
+                      <Label>Paste from Excel or Google Sheets (include header row if you have one)</Label>
+                      <Textarea
+                        className="min-h-[140px] font-mono text-sm"
+                        placeholder={`name\tstock\tcost\tselling\nAmoxicillin 500mg\t100\t50\t75`}
+                        value={bulkPasteText}
+                        onChange={(e) => setBulkPasteText(e.target.value)}
+                      />
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => runBulkPreviewFromText(bulkPasteText)}
+                        disabled={!bulkPasteText.trim()}
+                      >
+                        Preview import
+                      </Button>
+                    </TabsContent>
+                    <TabsContent value="file" className="space-y-3 mt-2">
+                      <p className="text-sm text-muted-foreground">
+                        Export your sheet as .xlsx or .csv, or use the CSV template above. First sheet is used for Excel files.
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <Button type="button" variant="outline" disabled={bulkFileLoading} asChild>
+                          <label className="cursor-pointer">
+                            <Upload className="w-4 h-4 mr-2 inline" />
+                            {bulkFileLoading ? 'Reading…' : 'Choose file'}
+                            <input
+                              type="file"
+                              accept=".csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+                              className="hidden"
+                              onChange={handleBulkFileChange}
+                            />
+                          </label>
+                        </Button>
+                      </div>
+                    </TabsContent>
+                    <TabsContent value="photo" className="space-y-3 mt-2">
+                      <p className="text-sm text-muted-foreground">
+                        Take a clear photo of a printed list or screen. OCR works best for typed text; you can edit the result on the Paste tab.
+                      </p>
+                      <Button type="button" variant="outline" disabled={bulkOcrLoading} asChild>
+                        <label className="cursor-pointer">
+                          <ImageIcon className="w-4 h-4 mr-2 inline" />
+                          {bulkOcrLoading ? 'Reading image…' : 'Choose image'}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={handleBulkImageOcr}
+                          />
+                        </label>
+                      </Button>
+                    </TabsContent>
+                  </Tabs>
+                  {bulkSkipped.length > 0 && (
+                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                      Skipped {bulkSkipped.length} row(s) (e.g. empty name). Check your data.
+                    </p>
+                  )}
+                  {bulkPreview.length > 0 && (
+                    <div className="space-y-2 flex-1 min-h-0">
+                      <Label>Preview ({bulkPreview.length} items)</Label>
+                      <ScrollArea className="h-[200px] rounded-md border">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b bg-muted/50 text-left">
+                              <th className="p-2 font-medium">Name</th>
+                              <th className="p-2 font-medium">Cat</th>
+                              <th className="p-2 font-medium text-right">Stock</th>
+                              <th className="p-2 font-medium text-right">Cost</th>
+                              <th className="p-2 font-medium text-right">Sell</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {bulkPreview.map((row, i) => (
+                              <tr key={i} className="border-b border-border/60">
+                                <td className="p-2 max-w-[140px] truncate" title={row.name}>
+                                  {row.name}
+                                </td>
+                                <td className="p-2 capitalize text-muted-foreground">{row.category}</td>
+                                <td className="p-2 text-right">{row.stock_quantity}</td>
+                                <td className="p-2 text-right">{row.cost_price}</td>
+                                <td className="p-2 text-right">{row.selling_price}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </ScrollArea>
+                    </div>
+                  )}
+                  <div className="flex gap-2 pt-2 border-t">
+                    <Button
+                      className="flex-1"
+                      onClick={confirmBulkImport}
+                      disabled={bulkPreview.length === 0}
+                    >
+                      Add {bulkPreview.length > 0 ? `${bulkPreview.length} ` : ''}items
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => setShowBulkDialog(false)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
               <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
                 <DialogTrigger asChild>
                   <Button>
@@ -336,6 +623,7 @@ export function InventoryModule() {
                   </div>
                 </DialogContent>
               </Dialog>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="flex gap-2 mb-4">

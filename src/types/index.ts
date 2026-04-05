@@ -7,6 +7,8 @@ export interface User {
   role: UserRole;
   room_id?: number;
   is_active: boolean;
+  /** Monthly gross salary (Rs.); used for payroll. */
+  monthly_salary?: number;
   created_at: string;
 }
 
@@ -39,8 +41,37 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
   xray_operator: ['xray', 'add_charges', 'view_bills', 'patient_records'],
   surgery_operator: ['surgery', 'add_charges', 'view_bills', 'patient_records'],
   pharmacy: ['pharmacy', 'inventory', 'add_charges', 'view_bills', 'patient_records'],
-  accountant: ['billing', 'reports', 'view_bills'],
+  accountant: ['billing', 'reports', 'view_bills', 'staff'],
 };
+
+export type AttendanceStatus = 'present' | 'absent' | 'half_day' | 'leave';
+
+export interface StaffAttendance {
+  id: number;
+  user_id: number;
+  work_date: string;
+  status: AttendanceStatus;
+  check_in?: string | null;
+  check_out?: string | null;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type SalaryPaymentMethod = 'cash' | 'bank' | 'other';
+
+export interface SalaryPayment {
+  id: number;
+  user_id: number;
+  period_start: string;
+  period_end: string;
+  amount: number;
+  paid_at: string;
+  payment_method: SalaryPaymentMethod;
+  notes?: string | null;
+  recorded_by_user_id: number;
+  created_at: string;
+}
 
 // Room Types
 export interface Room {
