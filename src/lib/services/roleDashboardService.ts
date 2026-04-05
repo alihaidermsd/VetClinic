@@ -4,6 +4,7 @@ import { getClinicDateString } from './tokenService';
 import { getDashboardStats } from './reportService';
 import { getAllUsers } from './userService';
 import { getAllRooms } from './roomService';
+import { getStaffHrSnapshot, type HrSnapshot } from './staffService';
 
 export type ActivityTotals = {
   /** Line items or payment rows */
@@ -29,6 +30,7 @@ export type RoleDashboardPayload =
       week: ActivityTotals;
       month: ActivityTotals;
       topThisMonth: TopServiceRow[];
+      hr: HrSnapshot;
     }
   | {
       mode: 'payments';
@@ -38,6 +40,7 @@ export type RoleDashboardPayload =
       day: ActivityTotals;
       week: ActivityTotals;
       month: ActivityTotals;
+      hr: HrSnapshot;
     }
   | {
       mode: 'admin';
@@ -48,6 +51,11 @@ export type RoleDashboardPayload =
       low_stock_items: number;
       active_users: number;
       active_rooms: number;
+      today_revenue_gross: number;
+      today_salary_paid: number;
+      today_net_income: number;
+      month_salary_paid: number;
+      selfHr: HrSnapshot;
     };
 
 function getYmdParts(value: unknown): { local: string; utc: string } | null {
@@ -210,6 +218,7 @@ function billLinesPayload(
     week: aggregateBillLines(userId, types, w.start, w.end),
     month: aggregateBillLines(userId, types, m.start, m.end),
     topThisMonth: topBillLinesThisMonth(userId, types, m.start, m.end, 8),
+    hr: getStaffHrSnapshot(userId),
   };
 }
 
@@ -226,11 +235,12 @@ function paymentsPayload(userId: number): RoleDashboardPayload {
     day: aggregatePayments(userId, d.start, d.end),
     week: aggregatePayments(userId, w.start, w.end),
     month: aggregatePayments(userId, m.start, m.end),
+    hr: getStaffHrSnapshot(userId),
   };
 }
 
-function adminPayload(): RoleDashboardPayload {
-  const stats = getDashboardStats();
+function adminPayload(userId: number): RoleDashboardPayload {
+  const stats = getDashboardStats() as any;
   const users = getAllUsers().filter((u) => u.is_active);
   const rooms = getAllRooms().filter((r) => r.is_active);
   return {
@@ -243,6 +253,11 @@ function adminPayload(): RoleDashboardPayload {
     low_stock_items: stats.low_stock_items,
     active_users: users.length,
     active_rooms: rooms.length,
+    today_revenue_gross: Number(stats.today_revenue) || 0,
+    today_salary_paid: Number(stats.today_salary_paid) || 0,
+    today_net_income: Number(stats.today_net_income) || 0,
+    month_salary_paid: Number(stats.month_salary_paid) || 0,
+    selfHr: getStaffHrSnapshot(userId),
   };
 }
 
@@ -295,7 +310,7 @@ export function getRoleDashboardPayload(userId: number, role: UserRole): RoleDas
     case 'accountant':
       return paymentsPayload(userId);
     case 'admin':
-      return adminPayload();
+      return adminPayload(userId);
     default:
       return billLinesPayload(
         userId,

@@ -185,6 +185,26 @@ export function getDashboardStats() {
   const payments = listTable('payments');
   const today_revenue = computeTodayRevenue(clinicToday, utcToday, bills, payments);
 
+  const salaryRows = listTable('salary_payments') as any[];
+  const today_salary_paid = salaryRows
+    .filter((p) => isDashboardCalendarDay(p.paid_at, clinicToday, utcToday))
+    .reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const today_net_income = today_revenue - today_salary_paid;
+
+  const ym = clinicToday.slice(0, 7);
+  const monthStart = `${ym}-01`;
+  const [cy, cm] = ym.split('-').map((v) => parseInt(v, 10));
+  const lastDom = new Date(cy, cm, 0).getDate();
+  const monthEnd = `${ym}-${String(lastDom).padStart(2, '0')}`;
+  const month_salary_paid = salaryRows.reduce((s, p) => {
+    const parts = getYmdParts(p.paid_at);
+    if (!parts) return s;
+    const hit =
+      (parts.local >= monthStart && parts.local <= monthEnd) ||
+      (parts.utc >= monthStart && parts.utc <= monthEnd);
+    return hit ? s + (Number(p.amount) || 0) : s;
+  }, 0);
+
   const inventoryRows = listTable('inventory');
   const low_stock_items = inventoryRows.filter(
     (row) =>
@@ -218,6 +238,9 @@ export function getDashboardStats() {
   return {
     today_tokens,
     today_revenue,
+    today_salary_paid,
+    today_net_income,
+    month_salary_paid,
     pending_tokens,
     low_stock_items,
     waiting_patients,

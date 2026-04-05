@@ -27,6 +27,24 @@ export async function initDatabase(): Promise<any> {
       if (lastIds.token_referrals == null) {
         lastIds.token_referrals = 0;
       }
+      if (!db.staff_attendance) {
+        db.staff_attendance = {};
+      }
+      if (lastIds.staff_attendance == null) {
+        lastIds.staff_attendance = 0;
+      }
+      if (!db.salary_payments) {
+        db.salary_payments = {};
+      }
+      if (lastIds.salary_payments == null) {
+        lastIds.salary_payments = 0;
+      }
+      for (const uid of Object.keys(db.users || {})) {
+        const u = db.users[Number(uid)];
+        if (u && (u.monthly_salary == null || u.monthly_salary === '')) {
+          u.monthly_salary = 0;
+        }
+      }
       saveDatabase();
     } else {
       // Create fresh database
@@ -67,7 +85,7 @@ function createTables() {
   const tables = [
     'users', 'rooms', 'patients', 'animals', 'tokens', 'bills',
     'bill_items', 'inventory', 'medical_records', 'payments', 'audit_logs', 'app_settings',
-    'token_referrals',
+    'token_referrals', 'staff_attendance', 'salary_payments',
   ];
   
   tables.forEach(table => {
@@ -104,6 +122,7 @@ function seedData() {
     name: 'Administrator',
     role: 'admin',
     is_active: 1,
+    monthly_salary: 0,
     created_at: new Date().toISOString(),
   });
 
@@ -466,6 +485,16 @@ export function importDatabase(data: string) {
     const parsed = JSON.parse(data);
     db = parsed.data || {};
     lastIds = parsed.lastIds || {};
+    if (!db.staff_attendance) db.staff_attendance = {};
+    if (lastIds.staff_attendance == null) lastIds.staff_attendance = 0;
+    if (!db.salary_payments) db.salary_payments = {};
+    if (lastIds.salary_payments == null) lastIds.salary_payments = 0;
+    for (const uid of Object.keys(db.users || {})) {
+      const u = db.users[Number(uid)];
+      if (u && (u.monthly_salary == null || u.monthly_salary === '')) {
+        u.monthly_salary = 0;
+      }
+    }
     saveDatabase();
   } catch (e) {
     console.error('Failed to import database:', e);

@@ -2,19 +2,23 @@ import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { 
-  Users, 
-  CreditCard, 
-  Clock, 
+import {
+  Users,
+  CreditCard,
+  Clock,
   AlertTriangle,
   RefreshCw,
   TrendingUp,
   Calendar,
   Stethoscope,
-  Package
+  Package,
+  CalendarCheck,
+  Wallet,
 } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth';
 import { getLowStockItems } from '@/lib/services/inventoryService';
 import { getTodayTokensForDashboard } from '@/lib/services/tokenService';
+import { getStaffHrSnapshot } from '@/lib/services/staffService';
 import { toast } from 'sonner';
 
 interface DashboardHomeProps {
@@ -23,9 +27,11 @@ interface DashboardHomeProps {
 }
 
 export function DashboardHome({ stats, onRefresh }: DashboardHomeProps) {
+  const { user } = useAuth();
   const [lowStock, setLowStock] = useState<any[]>([]);
   const [recentTokens, setRecentTokens] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const hr = user?.id ? getStaffHrSnapshot(user.id) : null;
 
   useEffect(() => {
     loadAdditionalData();
@@ -85,7 +91,7 @@ export function DashboardHome({ stats, onRefresh }: DashboardHomeProps) {
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-slate-500">Today's Revenue</p>
+                <p className="text-sm text-slate-500">Today&apos;s revenue (gross)</p>
                 <p className="text-2xl font-bold text-green-600">Rs. {(stats?.today_revenue || 0).toLocaleString()}</p>
               </div>
               <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
@@ -123,6 +129,83 @@ export function DashboardHome({ stats, onRefresh }: DashboardHomeProps) {
           </CardContent>
         </Card>
       </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card className="border-l-4 border-l-rose-200">
+          <CardContent className="p-5">
+            <p className="text-sm text-slate-500">Salary paid today</p>
+            <p className="text-xl font-bold text-rose-600 tabular-nums">
+              Rs. {Number(stats?.today_salary_paid ?? 0).toLocaleString()}
+            </p>
+            <p className="text-xs text-slate-400 mt-1">Deducted for net figures</p>
+          </CardContent>
+        </Card>
+        <Card className="border-l-4 border-l-emerald-200">
+          <CardContent className="p-5">
+            <p className="text-sm text-slate-500">Net today (after salary)</p>
+            <p
+              className={`text-xl font-bold tabular-nums ${
+                Number(stats?.today_net_income ?? 0) >= 0 ? 'text-emerald-700' : 'text-red-600'
+              }`}
+            >
+              Rs. {Number(stats?.today_net_income ?? 0).toLocaleString()}
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="border-l-4 border-l-violet-200">
+          <CardContent className="p-5">
+            <p className="text-sm text-slate-500">Staff salary (this month)</p>
+            <p className="text-xl font-bold text-violet-800 tabular-nums">
+              Rs. {Number(stats?.month_salary_paid ?? 0).toLocaleString()}
+            </p>
+            <p className="text-xs text-slate-400 mt-1">By payment date</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {hr && (
+        <Card className="border-slate-200 border-l-4 border-l-teal-500">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <CalendarCheck className="w-5 h-5 text-teal-600" />
+              Your attendance &amp; salary
+            </CardTitle>
+            <p className="text-sm text-slate-500 font-normal">{hr.monthLabel}</p>
+          </CardHeader>
+          <CardContent className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-0">
+            <div>
+              <p className="text-xs text-slate-500">Today ({hr.todayDate})</p>
+              <Badge variant="secondary" className="mt-1 capitalize">
+                {hr.todayAttendance === 'unmarked'
+                  ? 'Not marked'
+                  : hr.todayAttendance.replace('_', ' ')}
+              </Badge>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">Present units (month)</p>
+              <p className="text-lg font-semibold tabular-nums">{hr.presentUnitsThisMonth}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500 flex items-center gap-1">
+                <Wallet className="w-3 h-3" /> Monthly salary
+              </p>
+              <p className="text-lg font-semibold tabular-nums">
+                Rs. {hr.monthlySalary.toLocaleString()}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">This month payroll</p>
+              {hr.salaryPaidThisMonth ? (
+                <p className="text-lg font-semibold text-green-700">
+                  Paid · Rs. {hr.salaryPaidAmountThisMonth.toLocaleString()}
+                </p>
+              ) : (
+                <p className="text-lg font-semibold text-amber-700">Unpaid</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

@@ -16,6 +16,7 @@ import {
   Scan,
   Scissors,
   FileText,
+  Users2,
 } from 'lucide-react';
 import { ReceptionModule } from '@/modules/ReceptionModule';
 import { DoctorModule } from '@/modules/DoctorModule';
@@ -24,6 +25,7 @@ import { PharmacyModule } from '@/modules/PharmacyModule';
 import { InventoryModule } from '@/modules/InventoryModule';
 import { ReportsModule } from '@/modules/ReportsModule';
 import { AdminModule } from '@/modules/AdminModule';
+import { StaffModule } from '@/modules/StaffModule';
 import { PatientRecordsModule } from '@/modules/PatientRecordsModule';
 import { LabModule, XRayModule, SurgeryModule } from '@/modules/RoomOperatorModule';
 import { DashboardHome } from '@/modules/DashboardHome';
@@ -43,6 +45,7 @@ type ModuleType =
   | 'inventory'
   | 'reports'
   | 'patient_records'
+  | 'staff'
   | 'admin';
 
 const MODULE_IDS: ModuleType[] = [
@@ -57,6 +60,7 @@ const MODULE_IDS: ModuleType[] = [
   'inventory',
   'reports',
   'patient_records',
+  'staff',
   'admin',
 ];
 
@@ -97,12 +101,22 @@ const MODULE_NAV_ITEMS: NavItem[] = [
     permission: 'patient_records',
     access: 'permission',
   },
+  {
+    id: 'staff',
+    label: 'Staff',
+    icon: Users2,
+    permission: 'staff',
+    access: 'permission',
+  },
   { id: 'admin', label: 'Admin', icon: Settings, permission: '*', access: 'admin_only' },
 ];
 
 const EMPTY_DASHBOARD_STATS = {
   today_tokens: 0,
   today_revenue: 0,
+  today_salary_paid: 0,
+  today_net_income: 0,
+  month_salary_paid: 0,
   pending_tokens: 0,
   low_stock_items: 0,
   waiting_patients: 0,
@@ -267,6 +281,17 @@ export function Dashboard() {
         return <ReportsModule />;
       case 'patient_records':
         return <PatientRecordsModule />;
+      case 'staff':
+        return checkPermission('staff') && user?.id ? (
+          <StaffModule currentUserId={user.id} />
+        ) : (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-amber-900">
+            <p className="font-medium">Access restricted</p>
+            <p className="text-sm mt-1 text-amber-800">
+              You do not have permission to open Staff &amp; payroll.
+            </p>
+          </div>
+        );
       case 'admin':
         return user?.role === 'admin' ? (
           <AdminModule />
@@ -369,15 +394,31 @@ export function Dashboard() {
             </div>
             {showExecutiveDashboard(user?.role) && (
               <div className="flex items-center gap-4">
-                <div className="flex items-center gap-6 text-sm">
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
                   <div className="text-center">
                     <p className="text-slate-500">Today's Tokens</p>
                     <p className="font-semibold text-slate-900">{stats?.today_tokens ?? 0}</p>
                   </div>
                   <div className="text-center">
-                    <p className="text-slate-500">Revenue</p>
+                    <p className="text-slate-500">Revenue (gross)</p>
                     <p className="font-semibold text-green-600">
                       Rs. {Number(stats?.today_revenue ?? 0).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-slate-500">Salary paid today</p>
+                    <p className="font-semibold text-rose-600">
+                      Rs. {Number(stats?.today_salary_paid ?? 0).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-slate-500">Net today</p>
+                    <p
+                      className={`font-semibold ${
+                        Number(stats?.today_net_income ?? 0) >= 0 ? 'text-emerald-700' : 'text-red-600'
+                      }`}
+                    >
+                      Rs. {Number(stats?.today_net_income ?? 0).toLocaleString()}
                     </p>
                   </div>
                   <div className="text-center">
