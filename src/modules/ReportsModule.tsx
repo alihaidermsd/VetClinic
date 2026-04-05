@@ -85,19 +85,19 @@ function SummaryCards(props: {
         <Card className="shadow-sm">
           <CardContent className="p-4">
             <p className="text-xs text-slate-500 uppercase tracking-wide">Gross (subtotal)</p>
-            <p className="text-2xl font-bold text-slate-800">₹{formatInr(props.gross)}</p>
+            <p className="text-2xl font-bold text-slate-800">Rs. {formatInr(props.gross)}</p>
           </CardContent>
         </Card>
         <Card className="shadow-sm">
           <CardContent className="p-4">
             <p className="text-xs text-slate-500 uppercase tracking-wide">Discounts</p>
-            <p className="text-2xl font-bold text-amber-700">₹{formatInr(props.discount)}</p>
+            <p className="text-2xl font-bold text-amber-700">Rs. {formatInr(props.discount)}</p>
           </CardContent>
         </Card>
         <Card className="shadow-sm border-green-100 bg-green-50/40">
           <CardContent className="p-4">
             <p className="text-xs text-slate-600 uppercase tracking-wide">Net billed</p>
-            <p className="text-2xl font-bold text-green-700">₹{formatInr(props.net)}</p>
+            <p className="text-2xl font-bold text-green-700">Rs. {formatInr(props.net)}</p>
             {props.extra && (
               <p className="text-xs text-slate-600 mt-2">
                 {props.extra.label}: <span className="font-semibold">{props.extra.value}</span>
@@ -138,8 +138,8 @@ function BillLedgerTable({ rows, title }: { rows: BillReportRow[]; title: string
                     <div className="font-medium text-slate-800">{r.owner_name}</div>
                     <div className="text-xs text-slate-500">{r.animal_name}</div>
                   </td>
-                  <td className="py-2 px-3 text-right tabular-nums">₹{formatInr(r.final_amount)}</td>
-                  <td className="py-2 px-3 text-right tabular-nums text-green-700">₹{formatInr(r.paid_amount)}</td>
+                  <td className="py-2 px-3 text-right tabular-nums">Rs. {formatInr(r.final_amount)}</td>
+                  <td className="py-2 px-3 text-right tabular-nums text-green-700">Rs. {formatInr(r.paid_amount)}</td>
                   <td className="py-2 px-3">
                     <span className="capitalize text-xs">{r.payment_status}</span>
                     {r.payment_method && (
@@ -354,11 +354,11 @@ export function ReportsModule() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Net billed</span>
-                  <span className="font-semibold text-green-700">₹{formatInr(allTime.net_revenue)}</span>
+                  <span className="font-semibold text-green-700">Rs. {formatInr(allTime.net_revenue)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Payments recorded</span>
-                  <span className="font-medium">₹{formatInr(allTime.total_payments_recorded)}</span>
+                  <span className="font-medium">Rs. {formatInr(allTime.total_payments_recorded)}</span>
                 </div>
                 <Button type="button" variant="secondary" size="sm" className="w-full mt-3" onClick={exportAllTimeCsv}>
                   <FileSpreadsheet className="w-4 h-4 mr-2" />
@@ -445,7 +445,7 @@ export function ReportsModule() {
                               <tr key={`${room.room_id}-${room.room_name}`} className="border-t border-slate-100">
                                 <td className="py-2 px-3">{room.room_name}</td>
                                 <td className="py-2 px-3 text-right">{room.item_count}</td>
-                                <td className="py-2 px-3 text-right tabular-nums">₹{formatInr(room.total_charges)}</td>
+                                <td className="py-2 px-3 text-right tabular-nums">Rs. {formatInr(room.total_charges)}</td>
                               </tr>
                             ))}
                             {(!dailyReport.room_wise || dailyReport.room_wise.length === 0) && (
@@ -475,7 +475,7 @@ export function ReportsModule() {
                               <tr key={p.payment_method} className="border-t border-slate-100">
                                 <td className="py-2 px-3 capitalize">{p.payment_method}</td>
                                 <td className="py-2 px-3 text-right">{p.count}</td>
-                                <td className="py-2 px-3 text-right tabular-nums">₹{formatInr(p.total_amount)}</td>
+                                <td className="py-2 px-3 text-right tabular-nums">Rs. {formatInr(p.total_amount)}</td>
                               </tr>
                             ))}
                             {(!dailyReport.payment_wise || dailyReport.payment_wise.length === 0) && (
@@ -561,7 +561,7 @@ export function ReportsModule() {
                             <tr key={day.date} className="border-t border-slate-100">
                               <td className="py-2 px-3 whitespace-nowrap">{day.date}</td>
                               <td className="py-2 px-3 text-right">{day.bill_count}</td>
-                              <td className="py-2 px-3 text-right tabular-nums">₹{formatInr(day.revenue)}</td>
+                              <td className="py-2 px-3 text-right tabular-nums">Rs. {formatInr(day.revenue)}</td>
                             </tr>
                           ))}
                           {(!rangeReport.daily_breakdown || rangeReport.daily_breakdown.length === 0) && (
@@ -593,7 +593,7 @@ export function ReportsModule() {
                               <tr key={`${room.room_id}-${room.room_name}`} className="border-t border-slate-100">
                                 <td className="py-2 px-3">{room.room_name}</td>
                                 <td className="py-2 px-3 text-right">{room.item_count}</td>
-                                <td className="py-2 px-3 text-right tabular-nums">₹{formatInr(room.total_charges)}</td>
+                                <td className="py-2 px-3 text-right tabular-nums">Rs. {formatInr(room.total_charges)}</td>
                               </tr>
                             ))}
                             {(!rangeReport.room_wise || rangeReport.room_wise.length === 0) && (
@@ -623,7 +623,7 @@ export function ReportsModule() {
                               <tr key={p.payment_method} className="border-t border-slate-100">
                                 <td className="py-2 px-3 capitalize">{p.payment_method}</td>
                                 <td className="py-2 px-3 text-right">{p.count}</td>
-                                <td className="py-2 px-3 text-right tabular-nums">₹{formatInr(p.total_amount)}</td>
+                                <td className="py-2 px-3 text-right tabular-nums">Rs. {formatInr(p.total_amount)}</td>
                               </tr>
                             ))}
                             {(!rangeReport.payment_wise || rangeReport.payment_wise.length === 0) && (
@@ -699,7 +699,7 @@ export function ReportsModule() {
                       <tr key={`${doctor.doctor_id}-${doctor.doctor_name}`} className="border-t border-slate-100">
                         <td className="py-2 px-3">{doctor.doctor_name}</td>
                         <td className="py-2 px-3 text-right">{doctor.total_patients}</td>
-                        <td className="py-2 px-3 text-right tabular-nums">₹{formatInr(doctor.total_charges)}</td>
+                        <td className="py-2 px-3 text-right tabular-nums">Rs. {formatInr(doctor.total_charges)}</td>
                       </tr>
                     ))}
                     {doctorReport.length === 0 && (
@@ -761,7 +761,7 @@ export function ReportsModule() {
                     <Card>
                       <CardContent className="p-4">
                         <p className="text-xs text-slate-500">Revenue</p>
-                        <p className="text-xl font-bold text-green-700">₹{formatInr(medicineReport.summary.total_revenue)}</p>
+                        <p className="text-xl font-bold text-green-700">Rs. {formatInr(medicineReport.summary.total_revenue)}</p>
                       </CardContent>
                     </Card>
                   </div>
@@ -779,7 +779,7 @@ export function ReportsModule() {
                           <tr key={item.item_name} className="border-t border-slate-100">
                             <td className="py-2 px-3">{item.item_name}</td>
                             <td className="py-2 px-3 text-right">{item.total_quantity}</td>
-                            <td className="py-2 px-3 text-right tabular-nums">₹{formatInr(item.total_revenue)}</td>
+                            <td className="py-2 px-3 text-right tabular-nums">Rs. {formatInr(item.total_revenue)}</td>
                           </tr>
                         ))}
                         {(!medicineReport.item_wise || medicineReport.item_wise.length === 0) && (

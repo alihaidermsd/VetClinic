@@ -38,7 +38,7 @@ type RoleDashboardHomeProps = {
 };
 
 function formatInr(n: number) {
-  return `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+  return `Rs. ${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 }
 
 function StatCard({

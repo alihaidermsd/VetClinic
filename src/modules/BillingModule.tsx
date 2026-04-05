@@ -218,7 +218,7 @@ export function BillingModule() {
 
     const remaining = billBalance(currentBill.bill);
     if (amount > remaining + 0.001) {
-      toast.error(`Amount exceeds balance (₹${formatRupee(remaining)})`);
+      toast.error(`Amount exceeds balance (Rs. ${formatRupee(remaining)})`);
       return;
     }
 
@@ -261,7 +261,7 @@ export function BillingModule() {
 
     const remaining = billBalance(currentBill.bill);
     if (remaining > 0.01) {
-      toast.error(`₹${formatRupee(remaining)} still due`);
+      toast.error(`Rs. ${formatRupee(remaining)} still due`);
       return;
     }
 
@@ -472,7 +472,7 @@ export function BillingModule() {
                                       <p className="text-sm text-slate-600">{bill.animal_name}</p>
                                     </div>
                                     <div className="text-right">
-                                      <p className="font-semibold">₹{formatRupee(bill.final_amount)}</p>
+                                      <p className="font-semibold">Rs. {formatRupee(bill.final_amount)}</p>
                                       <Badge className={getStatusBadge(bill.payment_status)}>
                                         {bill.payment_status}
                                       </Badge>
@@ -503,7 +503,7 @@ export function BillingModule() {
                                       <p className="text-sm text-slate-600">{bill.animal_name}</p>
                                     </div>
                                     <div className="text-right">
-                                      <p className="font-semibold">₹{formatRupee(bill.final_amount)}</p>
+                                      <p className="font-semibold">Rs. {formatRupee(bill.final_amount)}</p>
                                       <Badge className={getStatusBadge(bill.payment_status)}>
                                         {bill.payment_status}
                                       </Badge>
@@ -587,9 +587,9 @@ export function BillingModule() {
                                   <p className="text-sm text-slate-500">{bill.owner_name}</p>
                                 </div>
                                 <div className="text-right">
-                                  <p className="font-semibold">₹{formatRupee(bill.final_amount)}</p>
+                                  <p className="font-semibold">Rs. {formatRupee(bill.final_amount)}</p>
                                   <p className="text-xs text-slate-500">
-                                    Paid: ₹{formatRupee(bill.paid_amount)} · Due: ₹
+                                    Paid: Rs. {formatRupee(bill.paid_amount)} · Due: Rs. 
                                     {formatRupee(billBalance(bill))}
                                   </p>
                                 </div>
@@ -618,7 +618,7 @@ export function BillingModule() {
                                   <p className="text-sm text-slate-500">{bill.owner_name}</p>
                                 </div>
                                 <div className="text-right">
-                                  <p className="font-semibold">₹{formatRupee(bill.final_amount)}</p>
+                                  <p className="font-semibold">Rs. {formatRupee(bill.final_amount)}</p>
                                   <Badge className={getStatusBadge(bill.payment_status)}>
                                     {bill.payment_status}
                                   </Badge>
@@ -744,7 +744,7 @@ export function BillingModule() {
                                 />
                               </td>
                               <td className="py-2 px-4 text-sm text-right">
-                                ₹
+                                Rs. 
                                 {formatRupee(
                                   (Number(editItemQty) || 0) * (Number(editItemPrice) || 0)
                                 )}
@@ -779,8 +779,8 @@ export function BillingModule() {
                                 {billItemProviderLabel(item)}
                               </td>
                               <td className="py-2 px-4 text-sm text-right">{item.quantity}</td>
-                              <td className="py-2 px-4 text-sm text-right">₹{formatRupee(item.unit_price)}</td>
-                              <td className="py-2 px-4 text-sm text-right">₹{formatRupee(item.total_price)}</td>
+                              <td className="py-2 px-4 text-sm text-right">Rs. {formatRupee(item.unit_price)}</td>
+                              <td className="py-2 px-4 text-sm text-right">Rs. {formatRupee(item.total_price)}</td>
                               <td className="py-2 px-4">
                                 <div className="flex justify-end gap-1">
                                   <Button
@@ -824,25 +824,25 @@ export function BillingModule() {
               <div className="w-64 space-y-2">
                 <div className="flex justify-between text-sm">
                   <span>Subtotal:</span>
-                  <span>₹{formatRupee(currentBill.bill.total_amount)}</span>
+                  <span>Rs. {formatRupee(currentBill.bill.total_amount)}</span>
                 </div>
                 {Number(currentBill.bill.discount_amount) > 0 && (
                   <div className="flex justify-between text-sm text-green-600">
                     <span>Discount ({currentBill.bill.discount_percent}%):</span>
-                    <span>-₹{formatRupee(currentBill.bill.discount_amount)}</span>
+                    <span>-Rs. {formatRupee(currentBill.bill.discount_amount)}</span>
                   </div>
                 )}
                 <div className="flex justify-between font-semibold text-lg border-t pt-2">
                   <span>Total:</span>
-                  <span>₹{formatRupee(currentBill.bill.final_amount)}</span>
+                  <span>Rs. {formatRupee(currentBill.bill.final_amount)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>Paid:</span>
-                  <span className="text-green-600">₹{formatRupee(currentBill.bill.paid_amount)}</span>
+                  <span className="text-green-600">Rs. {formatRupee(currentBill.bill.paid_amount)}</span>
                 </div>
                 <div className="flex justify-between text-sm font-medium">
                   <span>Balance:</span>
-                  <span className="text-red-600">₹{formatRupee(billBalance(currentBill.bill))}</span>
+                  <span className="text-red-600">Rs. {formatRupee(billBalance(currentBill.bill))}</span>
                 </div>
               </div>
             </div>
@@ -914,7 +914,7 @@ export function BillingModule() {
                 )}
                 <div className="flex gap-2">
                   <Button type="button" variant="secondary" className="flex-1" onClick={handlePayFullBalance}>
-                    Fill full balance (₹{formatRupee(billBalance(currentBill.bill))})
+                    Fill full balance (Rs. {formatRupee(billBalance(currentBill.bill))})
                   </Button>
                 </div>
                 <Button type="button" onClick={handleAddPayment} className="w-full">

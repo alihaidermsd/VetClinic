@@ -15,6 +15,7 @@ import {
   FlaskConical,
   Scan,
   Scissors,
+  FileText,
 } from 'lucide-react';
 import { ReceptionModule } from '@/modules/ReceptionModule';
 import { DoctorModule } from '@/modules/DoctorModule';
@@ -23,6 +24,7 @@ import { PharmacyModule } from '@/modules/PharmacyModule';
 import { InventoryModule } from '@/modules/InventoryModule';
 import { ReportsModule } from '@/modules/ReportsModule';
 import { AdminModule } from '@/modules/AdminModule';
+import { PatientRecordsModule } from '@/modules/PatientRecordsModule';
 import { LabModule, XRayModule, SurgeryModule } from '@/modules/RoomOperatorModule';
 import { DashboardHome } from '@/modules/DashboardHome';
 import { RoleDashboardHome, type RoleDashboardLink } from '@/modules/RoleDashboardHome';
@@ -40,6 +42,7 @@ type ModuleType =
   | 'pharmacy'
   | 'inventory'
   | 'reports'
+  | 'patient_records'
   | 'admin';
 
 const MODULE_IDS: ModuleType[] = [
@@ -53,6 +56,7 @@ const MODULE_IDS: ModuleType[] = [
   'pharmacy',
   'inventory',
   'reports',
+  'patient_records',
   'admin',
 ];
 
@@ -86,6 +90,13 @@ const MODULE_NAV_ITEMS: NavItem[] = [
   { id: 'pharmacy', label: 'Pharmacy', icon: Pill, permission: 'pharmacy', access: 'permission' },
   { id: 'inventory', label: 'Inventory', icon: Package, permission: 'inventory', access: 'permission' },
   { id: 'reports', label: 'Reports', icon: BarChart3, permission: 'reports', access: 'permission' },
+  {
+    id: 'patient_records',
+    label: 'Patient records',
+    icon: FileText,
+    permission: 'patient_records',
+    access: 'permission',
+  },
   { id: 'admin', label: 'Admin', icon: Settings, permission: '*', access: 'admin_only' },
 ];
 
@@ -254,6 +265,8 @@ export function Dashboard() {
         return <InventoryModule />;
       case 'reports':
         return <ReportsModule />;
+      case 'patient_records':
+        return <PatientRecordsModule />;
       case 'admin':
         return user?.role === 'admin' ? (
           <AdminModule />
@@ -364,7 +377,7 @@ export function Dashboard() {
                   <div className="text-center">
                     <p className="text-slate-500">Revenue</p>
                     <p className="font-semibold text-green-600">
-                      ₹{Number(stats?.today_revenue ?? 0).toLocaleString()}
+                      Rs. {Number(stats?.today_revenue ?? 0).toLocaleString()}
                     </p>
                   </div>
                   <div className="text-center">

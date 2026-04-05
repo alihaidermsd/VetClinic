@@ -22,7 +22,7 @@ export type UserRole =
 
 export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
   admin: ['*'],
-  reception: ['reception', 'billing', 'pharmacy', 'inventory', 'view_bills'],
+  reception: ['reception', 'billing', 'pharmacy', 'inventory', 'view_bills', 'patient_records'],
   doctor: [
     'doctor_room',
     'lab',
@@ -31,13 +31,14 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'pharmacy',
     'inventory',
     'patients',
+    'patient_records',
     'view_bills',
     'add_charges',
   ],
-  lab_operator: ['lab', 'add_charges', 'view_bills'],
-  xray_operator: ['xray', 'add_charges', 'view_bills'],
-  surgery_operator: ['surgery', 'add_charges', 'view_bills'],
-  pharmacy: ['pharmacy', 'inventory', 'add_charges', 'view_bills'],
+  lab_operator: ['lab', 'add_charges', 'view_bills', 'patient_records'],
+  xray_operator: ['xray', 'add_charges', 'view_bills', 'patient_records'],
+  surgery_operator: ['surgery', 'add_charges', 'view_bills', 'patient_records'],
+  pharmacy: ['pharmacy', 'inventory', 'add_charges', 'view_bills', 'patient_records'],
   accountant: ['billing', 'reports', 'view_bills'],
 };
 
@@ -210,6 +211,20 @@ export interface MedicalRecord {
   treatment?: string;
   notes?: string;
   follow_up_date?: string | null;
+  /** Lab operator / technical findings */
+  laboratory_notes?: string | null;
+  /** Doctor interpretation after lab results */
+  laboratory_examination?: string | null;
+  /** X-ray operator notes */
+  xray_notes?: string | null;
+  /** Doctor examination / report after imaging */
+  xray_examination?: string | null;
+  /** JSON array of base64 data URLs (stored locally; keep images small) */
+  xray_images?: string | null;
+  /** Surgery room operative notes */
+  surgery_notes?: string | null;
+  /** Doctor surgical case summary / required examination detail */
+  surgery_examination?: string | null;
   created_at: string;
 }
 

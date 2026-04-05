@@ -98,8 +98,8 @@ export function printBillReceipt(d: BillDetailsForPrint): boolean {
       return `<tr>
         <td class="item-cell">${escapeHtml(String(item.item_name))}${sub}</td>
         <td class="num">${escapeHtml(String(item.quantity))}</td>
-        <td class="num">₹${formatRupee(item.unit_price)}</td>
-        <td class="num">₹${formatRupee(item.total_price)}</td>
+        <td class="num">Rs. ${formatRupee(item.unit_price)}</td>
+        <td class="num">Rs. ${formatRupee(item.total_price)}</td>
       </tr>`;
     })
     .join('');
@@ -114,7 +114,7 @@ export function printBillReceipt(d: BillDetailsForPrint): boolean {
                .map(
                  (p) => `<tr>
                <td>${paymentMethodLabel(p.payment_method)}${p.transaction_id ? ` <span class="muted">#${escapeHtml(String(p.transaction_id))}</span>` : ''}</td>
-               <td class="num">₹${formatRupee(p.amount)}</td>
+               <td class="num">Rs. ${formatRupee(p.amount)}</td>
              </tr>`
                )
                .join('')}
@@ -253,17 +253,17 @@ export function printBillReceipt(d: BillDetailsForPrint): boolean {
     </tbody>
   </table>
   <div class="totals">
-    <div class="row"><span>Subtotal</span><span>₹${formatRupee(bill.total_amount)}</span></div>
+    <div class="row"><span>Subtotal</span><span>Rs. ${formatRupee(bill.total_amount)}</span></div>
     ${
       Number(bill.discount_amount) > 0
-        ? `<div class="row" style="color:#047857;"><span>Discount (${escapeHtml(String(bill.discount_percent))}%)</span><span>−₹${formatRupee(bill.discount_amount)}</span></div>`
+        ? `<div class="row" style="color:#047857;"><span>Discount (${escapeHtml(String(bill.discount_percent))}%)</span><span>−Rs. ${formatRupee(bill.discount_amount)}</span></div>`
         : ''
     }
-    <div class="row grand"><span>Total</span><span>₹${formatRupee(bill.final_amount)}</span></div>
-    <div class="row"><span>Paid</span><span style="color:#047857;">₹${formatRupee(bill.paid_amount)}</span></div>
+    <div class="row grand"><span>Total</span><span>Rs. ${formatRupee(bill.final_amount)}</span></div>
+    <div class="row"><span>Paid</span><span style="color:#047857;">Rs. ${formatRupee(bill.paid_amount)}</span></div>
     ${
       balance > 0.009
-        ? `<div class="row balance-due"><span>Balance due</span><span>₹${formatRupee(balance)}</span></div>`
+        ? `<div class="row balance-due"><span>Balance due</span><span>Rs. ${formatRupee(balance)}</span></div>`
         : ''
     }
   </div>

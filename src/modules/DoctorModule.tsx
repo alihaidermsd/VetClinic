@@ -18,6 +18,9 @@ import {
   ListOrdered,
   X,
   Percent,
+  FlaskConical,
+  Scan,
+  Scissors,
 } from 'lucide-react';
 import {
   getTokenByNumber,
@@ -45,6 +48,16 @@ const REFERRAL_ROOMS = [
 ];
 
 /** Use the doctor's assigned room from their user profile; avoid always attaching charges to the first doctor room. */
+function parseXrayImagesJson(raw: unknown): string[] {
+  if (raw == null || raw === '') return [];
+  try {
+    const p = JSON.parse(String(raw));
+    return Array.isArray(p) ? p.filter((x) => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 function resolveDoctorBillRoom(
   rooms: Room[],
   assignedRoomId: number | null | undefined
@@ -78,6 +91,13 @@ export function DoctorModule() {
   const [treatment, setTreatment] = useState('');
   const [notes, setNotes] = useState('');
   const [followUpDate, setFollowUpDate] = useState('');
+  const [laboratoryNotes, setLaboratoryNotes] = useState('');
+  const [laboratoryExamination, setLaboratoryExamination] = useState('');
+  const [xrayNotes, setXrayNotes] = useState('');
+  const [xrayExamination, setXrayExamination] = useState('');
+  const [xrayImageList, setXrayImageList] = useState<string[]>([]);
+  const [surgeryNotes, setSurgeryNotes] = useState('');
+  const [surgeryExamination, setSurgeryExamination] = useState('');
 
   // Billing form
   const [customItemName, setCustomItemName] = useState('');
@@ -135,6 +155,13 @@ export function DoctorModule() {
       setTreatment('');
       setNotes('');
       setFollowUpDate('');
+      setLaboratoryNotes('');
+      setLaboratoryExamination('');
+      setXrayNotes('');
+      setXrayExamination('');
+      setXrayImageList([]);
+      setSurgeryNotes('');
+      setSurgeryExamination('');
       return;
     }
     const records = getMedicalRecordsByBillId(billId);
@@ -145,12 +172,26 @@ export function DoctorModule() {
       setTreatment(latest.treatment ?? '');
       setNotes(latest.notes ?? '');
       setFollowUpDate(latest.follow_up_date ?? '');
+      setLaboratoryNotes(latest.laboratory_notes ?? '');
+      setLaboratoryExamination(latest.laboratory_examination ?? '');
+      setXrayNotes(latest.xray_notes ?? '');
+      setXrayExamination(latest.xray_examination ?? '');
+      setXrayImageList(parseXrayImagesJson(latest.xray_images));
+      setSurgeryNotes(latest.surgery_notes ?? '');
+      setSurgeryExamination(latest.surgery_examination ?? '');
     } else {
       setDiagnosis('');
       setSymptoms('');
       setTreatment('');
       setNotes('');
       setFollowUpDate('');
+      setLaboratoryNotes('');
+      setLaboratoryExamination('');
+      setXrayNotes('');
+      setXrayExamination('');
+      setXrayImageList([]);
+      setSurgeryNotes('');
+      setSurgeryExamination('');
     }
     setActiveTab('examination');
   }, [currentToken?.token?.id, currentBill?.bill?.id]);
@@ -337,6 +378,45 @@ export function DoctorModule() {
     }
   };
 
+  const removeXrayImageAt = (index: number) => {
+    setXrayImageList((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleXrayImagesChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files?.length) return;
+    const maxImages = 5;
+    const maxBytes = 2 * 1024 * 1024;
+    const next: string[] = [...xrayImageList];
+    for (const file of Array.from(files)) {
+      if (next.length >= maxImages) {
+        toast.error(`Maximum ${maxImages} images per visit`);
+        break;
+      }
+      if (!file.type.startsWith('image/')) {
+        toast.error(`${file.name} is not an image`);
+        continue;
+      }
+      if (file.size > maxBytes) {
+        toast.error(`${file.name} is too large (max 2 MB each)`);
+        continue;
+      }
+      try {
+        const dataUrl = await new Promise<string>((res, rej) => {
+          const r = new FileReader();
+          r.onload = () => res(String(r.result || ''));
+          r.onerror = () => rej();
+          r.readAsDataURL(file);
+        });
+        if (dataUrl) next.push(dataUrl);
+      } catch {
+        toast.error('Could not read image');
+      }
+    }
+    setXrayImageList(next);
+    e.target.value = '';
+  };
+
   const handleSaveMedicalRecord = () => {
     if (!currentToken || !currentBill || !user) {
       toast.error('Load a visit first');
@@ -351,11 +431,25 @@ export function DoctorModule() {
       return;
     }
 
-    const hasContent = [symptoms, diagnosis, treatment, notes, followUpDate].some(
-      (s) => String(s ?? '').trim().length > 0
-    );
+    const textFields = [
+      symptoms,
+      diagnosis,
+      treatment,
+      notes,
+      followUpDate,
+      laboratoryNotes,
+      laboratoryExamination,
+      xrayNotes,
+      xrayExamination,
+      surgeryNotes,
+      surgeryExamination,
+    ];
+    const hasContent =
+      textFields.some((s) => String(s ?? '').trim().length > 0) || xrayImageList.length > 0;
     if (!hasContent) {
-      toast.error('Enter at least one field (symptoms, diagnosis, treatment, notes, or follow-up date)');
+      toast.error(
+        'Enter at least one field in general examination, lab/X-ray/surgery sections, attach an X-ray image, or set follow-up date'
+      );
       return;
     }
 
@@ -372,6 +466,13 @@ export function DoctorModule() {
         treatment,
         notes,
         follow_up_date: followUpDate.trim() ? followUpDate : null,
+        laboratory_notes: laboratoryNotes.trim() ? laboratoryNotes : null,
+        laboratory_examination: laboratoryExamination.trim() ? laboratoryExamination : null,
+        xray_notes: xrayNotes.trim() ? xrayNotes : null,
+        xray_examination: xrayExamination.trim() ? xrayExamination : null,
+        xray_images: JSON.stringify(xrayImageList),
+        surgery_notes: surgeryNotes.trim() ? surgeryNotes : null,
+        surgery_examination: surgeryExamination.trim() ? surgeryExamination : null,
       });
 
       const savedRows = getMedicalRecordsByBillId(currentBill.bill.id);
@@ -382,6 +483,13 @@ export function DoctorModule() {
         setTreatment(latest.treatment ?? '');
         setNotes(latest.notes ?? '');
         setFollowUpDate(latest.follow_up_date ?? '');
+        setLaboratoryNotes(latest.laboratory_notes ?? '');
+        setLaboratoryExamination(latest.laboratory_examination ?? '');
+        setXrayNotes(latest.xray_notes ?? '');
+        setXrayExamination(latest.xray_examination ?? '');
+        setXrayImageList(parseXrayImagesJson(latest.xray_images));
+        setSurgeryNotes(latest.surgery_notes ?? '');
+        setSurgeryExamination(latest.surgery_examination ?? '');
       }
 
       const refreshed = getBillWithDetails(currentBill.bill.id);
@@ -603,17 +711,159 @@ export function DoctorModule() {
                       disabled={visitLocked}
                     />
                   </div>
-                  <Button
-                    type="button"
-                    onClick={handleSaveMedicalRecord}
-                    className="w-full"
-                    disabled={visitLocked}
-                  >
-                    <FileText className="w-4 h-4 mr-2" />
-                    Save Medical Record
-                  </Button>
                 </CardContent>
               </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <FlaskConical className="w-5 h-5 text-emerald-700" />
+                    Laboratory
+                  </CardTitle>
+                  <p className="text-sm text-slate-500">
+                    Operator findings and your clinical interpretation after lab work.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="labNotes">Lab / technical notes</Label>
+                    <Textarea
+                      id="labNotes"
+                      value={laboratoryNotes}
+                      onChange={(e) => setLaboratoryNotes(e.target.value)}
+                      placeholder="Results or notes from the laboratory (can be filled by lab staff or you)"
+                      rows={3}
+                      disabled={visitLocked}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="labExam">Doctor examination after laboratory</Label>
+                    <Textarea
+                      id="labExam"
+                      value={laboratoryExamination}
+                      onChange={(e) => setLaboratoryExamination(e.target.value)}
+                      placeholder="Your examination and interpretation of lab results"
+                      rows={3}
+                      disabled={visitLocked}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Scan className="w-5 h-5 text-sky-700" />
+                    X-Ray
+                  </CardTitle>
+                  <p className="text-sm text-slate-500">
+                    Imaging notes, your report, and attached images (stored in this browser only).
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="xrayOp">X-ray / operator notes</Label>
+                    <Textarea
+                      id="xrayOp"
+                      value={xrayNotes}
+                      onChange={(e) => setXrayNotes(e.target.value)}
+                      placeholder="Technical notes from imaging"
+                      rows={2}
+                      disabled={visitLocked}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="xrayExam">Doctor examination / report after X-ray</Label>
+                    <Textarea
+                      id="xrayExam"
+                      value={xrayExamination}
+                      onChange={(e) => setXrayExamination(e.target.value)}
+                      placeholder="Radiological interpretation and clinical correlation"
+                      rows={3}
+                      disabled={visitLocked}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>X-ray images (max 5, 2 MB each)</Label>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="max-w-xs"
+                        disabled={visitLocked}
+                        onChange={handleXrayImagesChange}
+                      />
+                      <span className="text-xs text-slate-500">{xrayImageList.length} / 5</span>
+                    </div>
+                    {xrayImageList.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {xrayImageList.map((src, i) => (
+                          <div key={i} className="relative group w-24 h-24 border rounded overflow-hidden bg-slate-100">
+                            <img src={src} alt="" className="w-full h-full object-cover" />
+                            {!visitLocked && (
+                              <button
+                                type="button"
+                                className="absolute top-1 right-1 bg-red-600 text-white rounded p-0.5 opacity-90 hover:opacity-100"
+                                onClick={() => removeXrayImageAt(i)}
+                                aria-label="Remove image"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Scissors className="w-5 h-5 text-rose-700" />
+                    Surgery
+                  </CardTitle>
+                  <p className="text-sm text-slate-500">
+                    Operative notes and full surgical examination summary.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="surgNotes">Surgery room / operative notes</Label>
+                    <Textarea
+                      id="surgNotes"
+                      value={surgeryNotes}
+                      onChange={(e) => setSurgeryNotes(e.target.value)}
+                      placeholder="Procedure notes from the surgery room"
+                      rows={3}
+                      disabled={visitLocked}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="surgExam">Doctor surgical examination &amp; case summary</Label>
+                    <Textarea
+                      id="surgExam"
+                      value={surgeryExamination}
+                      onChange={(e) => setSurgeryExamination(e.target.value)}
+                      placeholder="Pre-/intra-/post-operative assessment, procedure summary, recovery instructions"
+                      rows={4}
+                      disabled={visitLocked}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Button
+                type="button"
+                onClick={handleSaveMedicalRecord}
+                className="w-full"
+                disabled={visitLocked}
+              >
+                <FileText className="w-4 h-4 mr-2" />
+                Save Medical Record
+              </Button>
             </TabsContent>
 
             {/* Billing Tab */}
@@ -717,7 +967,7 @@ export function DoctorModule() {
                               <tr key={item.id} className="border-b border-slate-100">
                                 <td className="py-2 text-sm">{item.item_name}</td>
                                 <td className="py-2 text-sm text-right">{item.quantity}</td>
-                                <td className="py-2 text-sm text-right">₹{item.total_price}</td>
+                                <td className="py-2 text-sm text-right">Rs. {item.total_price}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -728,7 +978,7 @@ export function DoctorModule() {
                                   Discount ({currentBill.bill.discount_percent}%)
                                 </td>
                                 <td className="py-1 text-right">
-                                  −₹{Number(currentBill.bill.discount_amount).toLocaleString('en-IN')}
+                                  −Rs. {Number(currentBill.bill.discount_amount).toLocaleString('en-IN')}
                                 </td>
                               </tr>
                             )}
@@ -737,7 +987,7 @@ export function DoctorModule() {
                                 Subtotal
                               </td>
                               <td className="py-2 text-right">
-                                ₹{Number(currentBill.bill.total_amount || 0).toLocaleString('en-IN')}
+                                Rs. {Number(currentBill.bill.total_amount || 0).toLocaleString('en-IN')}
                               </td>
                             </tr>
                             <tr className="font-bold text-base text-blue-800">
@@ -745,7 +995,7 @@ export function DoctorModule() {
                                 Patient total
                               </td>
                               <td className="py-2 text-right">
-                                ₹{Number(currentBill.bill.final_amount || 0).toLocaleString('en-IN')}
+                                Rs. {Number(currentBill.bill.final_amount || 0).toLocaleString('en-IN')}
                               </td>
                             </tr>
                           </tfoot>
@@ -757,13 +1007,13 @@ export function DoctorModule() {
                         <span>
                           Subtotal:{' '}
                           <strong className="text-slate-900">
-                            ₹{Number(currentBill.bill.total_amount || 0).toLocaleString('en-IN')}
+                            Rs. {Number(currentBill.bill.total_amount || 0).toLocaleString('en-IN')}
                           </strong>
                         </span>
                         <span>
                           Patient total:{' '}
                           <strong className="text-blue-800 text-base">
-                            ₹{Number(currentBill.bill.final_amount || 0).toLocaleString('en-IN')}
+                            Rs. {Number(currentBill.bill.final_amount || 0).toLocaleString('en-IN')}
                           </strong>
                         </span>
                       </div>

@@ -1,10 +1,21 @@
 import { query, getOne, run, listTable } from '../database';
 import { getPatientById, getAnimalById } from './patientService';
+import { getBillById } from './billingService';
 import type { MedicalRecord } from '@/types';
 
 function datePart(iso: string | undefined | null): string | null {
   if (!iso || typeof iso !== 'string') return null;
   return iso.split('T')[0] ?? null;
+}
+
+const MR_INSERT_COLS =
+  'bill_id, patient_id, animal_id, doctor_id, doctor_name, room_id, diagnosis, symptoms, treatment, notes, follow_up_date, laboratory_notes, laboratory_examination, xray_notes, xray_examination, xray_images, surgery_notes, surgery_examination, created_at';
+
+function normalizeXrayImages(raw: unknown): string {
+  if (raw == null || raw === '') return '[]';
+  const s = String(raw).trim();
+  if (s.startsWith('[')) return s;
+  return '[]';
 }
 
 /** One logical note per bill: update latest row if present, else insert (avoids duplicate rows on every Save). */
@@ -20,6 +31,13 @@ export function saveMedicalRecordForBill(
       treatment: data.treatment,
       notes: data.notes,
       follow_up_date: data.follow_up_date,
+      laboratory_notes: data.laboratory_notes,
+      laboratory_examination: data.laboratory_examination,
+      xray_notes: data.xray_notes,
+      xray_examination: data.xray_examination,
+      xray_images: data.xray_images != null ? normalizeXrayImages(data.xray_images) : undefined,
+      surgery_notes: data.surgery_notes,
+      surgery_examination: data.surgery_examination,
     });
     if (updated) return updated;
     throw new Error('Failed to update medical record');
@@ -30,9 +48,8 @@ export function saveMedicalRecordForBill(
 // Create medical record
 export function createMedicalRecord(data: Omit<MedicalRecord, 'id' | 'created_at'>): MedicalRecord {
   const ts = new Date().toISOString();
-  // Single-line INSERT so paramsToObject maps columns to params reliably.
   const result = run(
-    'INSERT INTO medical_records (bill_id, patient_id, animal_id, doctor_id, doctor_name, room_id, diagnosis, symptoms, treatment, notes, follow_up_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    `INSERT INTO medical_records (${MR_INSERT_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       data.bill_id,
       data.patient_id,
@@ -45,11 +62,73 @@ export function createMedicalRecord(data: Omit<MedicalRecord, 'id' | 'created_at
       data.treatment || null,
       data.notes || null,
       data.follow_up_date || null,
+      data.laboratory_notes ?? null,
+      data.laboratory_examination ?? null,
+      data.xray_notes ?? null,
+      data.xray_examination ?? null,
+      normalizeXrayImages(data.xray_images),
+      data.surgery_notes ?? null,
+      data.surgery_examination ?? null,
       ts,
     ]
   );
 
   return getOne('SELECT * FROM medical_records WHERE id = ?', [result.lastInsertRowid]) as MedicalRecord;
+}
+
+/** Lab / X-ray / surgery operators: merge notes onto the bill's medical record (creates stub row if needed). */
+export function upsertMedicalRecordFields(
+  billId: number,
+  user: { id: number; name: string },
+  roomId: number,
+  patch: Partial<
+    Pick<
+      MedicalRecord,
+      | 'laboratory_notes'
+      | 'laboratory_examination'
+      | 'xray_notes'
+      | 'xray_examination'
+      | 'xray_images'
+      | 'surgery_notes'
+      | 'surgery_examination'
+    >
+  >
+): MedicalRecord {
+  const bill = getBillById(billId);
+  if (!bill) throw new Error('Bill not found');
+
+  const existing = getMedicalRecordsByBillId(billId);
+  if (existing.length > 0) {
+    const latest = existing[0];
+    const next: Parameters<typeof updateMedicalRecord>[1] = { ...patch };
+    if (patch.xray_images !== undefined) {
+      next.xray_images = normalizeXrayImages(patch.xray_images);
+    }
+    const updated = updateMedicalRecord(latest.id, next);
+    if (updated) return updated;
+    throw new Error('Failed to update medical record');
+  }
+
+  return createMedicalRecord({
+    bill_id: billId,
+    patient_id: bill.patient_id,
+    animal_id: bill.animal_id,
+    doctor_id: user.id,
+    doctor_name: user.name,
+    room_id: roomId,
+    diagnosis: '',
+    symptoms: '',
+    treatment: '',
+    notes: '',
+    follow_up_date: null,
+    laboratory_notes: patch.laboratory_notes ?? null,
+    laboratory_examination: patch.laboratory_examination ?? null,
+    xray_notes: patch.xray_notes ?? null,
+    xray_examination: patch.xray_examination ?? null,
+    xray_images: patch.xray_images != null ? normalizeXrayImages(patch.xray_images) : '[]',
+    surgery_notes: patch.surgery_notes ?? null,
+    surgery_examination: patch.surgery_examination ?? null,
+  });
 }
 
 // Get medical record by ID
@@ -85,33 +164,34 @@ export function getMedicalRecordsByAnimalId(animalId: number): MedicalRecord[] {
 export function updateMedicalRecord(id: number, updates: Partial<MedicalRecord>): MedicalRecord | null {
   const sets: string[] = [];
   const values: any[] = [];
-  
-  if (updates.diagnosis !== undefined) {
-    sets.push('diagnosis = ?');
-    values.push(updates.diagnosis);
+
+  const stringFields: (keyof MedicalRecord)[] = [
+    'diagnosis',
+    'symptoms',
+    'treatment',
+    'notes',
+    'follow_up_date',
+    'laboratory_notes',
+    'laboratory_examination',
+    'xray_notes',
+    'xray_examination',
+    'xray_images',
+    'surgery_notes',
+    'surgery_examination',
+  ];
+
+  for (const key of stringFields) {
+    if (updates[key] !== undefined) {
+      sets.push(`${key} = ?`);
+      values.push(updates[key]);
+    }
   }
-  if (updates.symptoms !== undefined) {
-    sets.push('symptoms = ?');
-    values.push(updates.symptoms);
-  }
-  if (updates.treatment !== undefined) {
-    sets.push('treatment = ?');
-    values.push(updates.treatment);
-  }
-  if (updates.notes !== undefined) {
-    sets.push('notes = ?');
-    values.push(updates.notes);
-  }
-  if (updates.follow_up_date !== undefined) {
-    sets.push('follow_up_date = ?');
-    values.push(updates.follow_up_date);
-  }
-  
+
   if (sets.length === 0) return getMedicalRecordById(id);
-  
+
   values.push(id);
   run(`UPDATE medical_records SET ${sets.join(', ')} WHERE id = ?`, values);
-  
+
   return getMedicalRecordById(id);
 }
 

@@ -86,7 +86,7 @@ export function DashboardHome({ stats, onRefresh }: DashboardHomeProps) {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-slate-500">Today's Revenue</p>
-                <p className="text-2xl font-bold text-green-600">₹{(stats?.today_revenue || 0).toLocaleString()}</p>
+                <p className="text-2xl font-bold text-green-600">Rs. {(stats?.today_revenue || 0).toLocaleString()}</p>
               </div>
               <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
                 <CreditCard className="w-6 h-6 text-green-600" />

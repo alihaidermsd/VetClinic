@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Search,
@@ -25,6 +26,7 @@ import {
   completeOperatorRoomVisit,
 } from '@/lib/services/tokenService';
 import { getBillWithDetails, addBillItem, applyDiscount } from '@/lib/services/billingService';
+import { getMedicalRecordsByBillId, upsertMedicalRecordFields } from '@/lib/services/medicalService';
 import { getAllRooms } from '@/lib/services/roomService';
 import { useAuth } from '@/hooks/useAuth';
 import type { BillItemFormData, Room, RoomType, Token, ItemType, RoomQueueItem } from '@/types';
@@ -83,6 +85,7 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
   const [customItemPrice, setCustomItemPrice] = useState('');
   const [itemQuantity, setItemQuantity] = useState('1');
   const [billDiscountPercent, setBillDiscountPercent] = useState('');
+  const [operatorNotes, setOperatorNotes] = useState('');
 
   useEffect(() => {
     setRooms(getAllRooms());
@@ -118,6 +121,23 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
     const p = Number(b.discount_percent);
     setBillDiscountPercent(Number.isFinite(p) && p > 0 ? String(p) : '');
   }, [currentBill?.bill?.id]);
+
+  useEffect(() => {
+    const bid = currentBill?.bill?.id;
+    if (!bid) {
+      setOperatorNotes('');
+      return;
+    }
+    const recs = getMedicalRecordsByBillId(bid);
+    const latest = recs[0];
+    if (!latest) {
+      setOperatorNotes('');
+      return;
+    }
+    if (roomType === 'lab') setOperatorNotes(latest.laboratory_notes ?? '');
+    else if (roomType === 'xray') setOperatorNotes(latest.xray_notes ?? '');
+    else setOperatorNotes(latest.surgery_notes ?? '');
+  }, [currentBill?.bill?.id, roomType]);
 
   const statusBadgeClass = (status: string) => {
     const styles: Record<string, string> = {
@@ -327,6 +347,37 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
       toast.success('Discount removed');
     } catch {
       toast.error('Could not remove discount');
+    }
+  };
+
+  const handleSaveOperatorNotes = () => {
+    if (!currentBill?.bill?.id || !user) {
+      toast.error('Load a visit first');
+      return;
+    }
+    if (visitLocked) {
+      toast.error('This visit is read-only');
+      return;
+    }
+    const { roomId } = resolveOperatorBillRoom(rooms, user.room_id, roomType);
+    if (!roomId) {
+      toast.error(`No ${sectionTitle} is configured. Add it under Admin → Rooms.`);
+      return;
+    }
+    const patch =
+      roomType === 'lab'
+        ? { laboratory_notes: operatorNotes.trim() ? operatorNotes : null }
+        : roomType === 'xray'
+          ? { xray_notes: operatorNotes.trim() ? operatorNotes : null }
+          : { surgery_notes: operatorNotes.trim() ? operatorNotes : null };
+    try {
+      upsertMedicalRecordFields(currentBill.bill.id, { id: user.id, name: user.name }, roomId, patch);
+      toast.success('Clinical notes saved');
+      const refreshed = getBillWithDetails(currentBill.bill.id);
+      if (refreshed) setCurrentBill(refreshed);
+    } catch (e) {
+      toast.error('Could not save clinical notes');
+      console.error(e);
     }
   };
 
@@ -551,7 +602,7 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
                             <tr key={item.id} className="border-b border-slate-100">
                               <td className="py-2 text-sm">{item.item_name}</td>
                               <td className="py-2 text-sm text-right">{item.quantity}</td>
-                              <td className="py-2 text-sm text-right">₹{item.total_price}</td>
+                              <td className="py-2 text-sm text-right">Rs. {item.total_price}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -562,7 +613,7 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
                                 Discount ({currentBill.bill.discount_percent}%)
                               </td>
                               <td className="py-1 text-right">
-                                −₹{Number(currentBill.bill.discount_amount).toLocaleString('en-IN')}
+                                −Rs. {Number(currentBill.bill.discount_amount).toLocaleString('en-IN')}
                               </td>
                             </tr>
                           )}
@@ -571,7 +622,7 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
                               Subtotal
                             </td>
                             <td className="py-2 text-right">
-                              ₹{Number(currentBill.bill.total_amount || 0).toLocaleString('en-IN')}
+                              Rs. {Number(currentBill.bill.total_amount || 0).toLocaleString('en-IN')}
                             </td>
                           </tr>
                           <tr className="font-bold text-base text-blue-800">
@@ -579,13 +630,43 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
                               Patient total
                             </td>
                             <td className="py-2 text-right">
-                              ₹{Number(currentBill.bill.final_amount || 0).toLocaleString('en-IN')}
+                              Rs. {Number(currentBill.bill.final_amount || 0).toLocaleString('en-IN')}
                             </td>
                           </tr>
                         </tfoot>
                       </table>
                     </div>
                   )}
+                </div>
+
+                <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-4 space-y-3">
+                  <Label htmlFor={`op-notes-${roomType}`} className="text-slate-800">
+                    Clinical notes ({sectionTitle})
+                  </Label>
+                  <Textarea
+                    id={`op-notes-${roomType}`}
+                    value={operatorNotes}
+                    onChange={(e) => setOperatorNotes(e.target.value)}
+                    placeholder={
+                      roomType === 'lab'
+                        ? 'Test results, values, or technical findings…'
+                        : roomType === 'xray'
+                          ? 'Views taken, exposure, technical observations…'
+                          : 'Procedure summary, findings, operative notes…'
+                    }
+                    rows={4}
+                    disabled={visitLocked}
+                    className="bg-white"
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full sm:w-auto"
+                    onClick={handleSaveOperatorNotes}
+                    disabled={visitLocked}
+                  >
+                    Save clinical notes
+                  </Button>
                 </div>
 
                 <Button

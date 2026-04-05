@@ -211,7 +211,7 @@ export function InventoryModule() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-slate-500">Inventory Value</p>
-                  <p className="text-2xl font-bold">₹{stats.totalValue.toLocaleString()}</p>
+                  <p className="text-2xl font-bold">Rs. {stats.totalValue.toLocaleString()}</p>
                 </div>
                 <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
                   <TrendingUp className="w-6 h-6 text-green-600" />
@@ -371,8 +371,8 @@ export function InventoryModule() {
                         <td className="py-3">{item.name}</td>
                         <td className="py-3 text-sm text-slate-500">{item.category}</td>
                         <td className="py-3 text-right">{item.stock_quantity}</td>
-                        <td className="py-3 text-right">₹{item.cost_price}</td>
-                        <td className="py-3 text-right">₹{item.selling_price}</td>
+                        <td className="py-3 text-right">Rs. {item.cost_price}</td>
+                        <td className="py-3 text-right">Rs. {item.selling_price}</td>
                         <td className="py-3">
                           {item.stock_quantity <= item.min_stock_level ? (
                             <Badge className="bg-red-100 text-red-800">Low</Badge>
@@ -517,7 +517,7 @@ export function InventoryModule() {
                         <p className="font-medium capitalize">{cat.category}</p>
                         <p className="text-2xl font-bold">{cat.count} items</p>
                         <p className="text-sm text-slate-500">
-                          Value: ₹{cat.value.toLocaleString()}
+                          Value: Rs. {cat.value.toLocaleString()}
                         </p>
                       </CardContent>
                     </Card>

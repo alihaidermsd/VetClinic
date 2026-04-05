@@ -580,7 +580,7 @@ export function PharmacyModule() {
                                 <div>
                                   <p className="font-medium">{item.name}</p>
                                   <p className="text-sm text-slate-500">
-                                    Stock: {item.stock_quantity} | ₹{item.selling_price}
+                                    Stock: {item.stock_quantity} | Rs. {item.selling_price}
                                   </p>
                                 </div>
                                 <Button size="sm" onClick={() => addToCart(item)}>
@@ -631,7 +631,7 @@ export function PharmacyModule() {
                                 >
                                   <div className="flex-1">
                                     <p className="font-medium">{item.name}</p>
-                                    <p className="text-sm text-slate-500">₹{item.unit_price} each</p>
+                                    <p className="text-sm text-slate-500">Rs. {item.unit_price} each</p>
                                   </div>
                                   <div className="flex items-center gap-2">
                                     <Button
@@ -663,7 +663,7 @@ export function PharmacyModule() {
                             <div className="mt-4 pt-4 border-t">
                               <div className="flex justify-between items-center mb-4">
                                 <span className="font-semibold">Total:</span>
-                                <span className="text-xl font-bold">₹{cartTotal}</span>
+                                <span className="text-xl font-bold">Rs. {cartTotal}</span>
                               </div>
                               <Button onClick={handleAddToBill} className="w-full">
                                 Add to Bill
@@ -707,8 +707,8 @@ export function PharmacyModule() {
                                   <td className="py-2">{item.item_name}</td>
                                   <td className="py-2 text-slate-500">{billItemProviderLabel(item)}</td>
                                   <td className="py-2 text-right">{item.quantity}</td>
-                                  <td className="py-2 text-right">₹{formatRupee(item.unit_price)}</td>
-                                  <td className="py-2 text-right">₹{formatRupee(item.total_price)}</td>
+                                  <td className="py-2 text-right">Rs. {formatRupee(item.unit_price)}</td>
+                                  <td className="py-2 text-right">Rs. {formatRupee(item.total_price)}</td>
                                 </tr>
                               ))
                             ) : (
@@ -730,22 +730,22 @@ export function PharmacyModule() {
                           <div className="flex justify-between">
                             <span>Subtotal:</span>
                             <span>
-                              ₹{formatRupee(currentBill.bill?.total_amount)}
+                              Rs. {formatRupee(currentBill.bill?.total_amount)}
                             </span>
                           </div>
                           {Number(currentBill.bill?.discount_amount) > 0 && (
                             <div className="flex justify-between text-emerald-700">
                               <span>Discount ({currentBill.bill?.discount_percent}%):</span>
-                              <span>-₹{formatRupee(currentBill.bill?.discount_amount)}</span>
+                              <span>-Rs. {formatRupee(currentBill.bill?.discount_amount)}</span>
                             </div>
                           )}
                           <div className="flex justify-between font-semibold border-t pt-2">
                             <span>Final Amount:</span>
-                            <span>₹{formatRupee(currentBill.bill?.final_amount)}</span>
+                            <span>Rs. {formatRupee(currentBill.bill?.final_amount)}</span>
                           </div>
                           <div className="flex justify-between text-slate-600">
                             <span>Paid:</span>
-                            <span>₹{formatRupee(currentBill.bill?.paid_amount)}</span>
+                            <span>Rs. {formatRupee(currentBill.bill?.paid_amount)}</span>
                           </div>
                         </div>
                       </div>
@@ -798,7 +798,7 @@ export function PharmacyModule() {
                         <td className="py-3">{item.name}</td>
                         <td className="py-3 text-sm text-slate-500">{item.category}</td>
                         <td className="py-3 text-right">{item.stock_quantity}</td>
-                        <td className="py-3 text-right">₹{item.selling_price}</td>
+                        <td className="py-3 text-right">Rs. {item.selling_price}</td>
                         <td className="py-3">
                           {item.stock_quantity <= item.min_stock_level ? (
                             <Badge className="bg-red-100 text-red-800">Low Stock</Badge>

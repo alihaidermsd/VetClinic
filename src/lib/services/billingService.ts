@@ -33,6 +33,13 @@ export function getBillByTokenId(tokenId: number): Bill | null {
   return getOne('SELECT * FROM bills WHERE token_id = ?', [tokenId]) as Bill | null;
 }
 
+/** All bills for a pet, newest first (patient record timeline). */
+export function getBillsByAnimalId(animalId: number): Bill[] {
+  return (listTable('bills') as Bill[])
+    .filter((b) => Number(b.animal_id) === Number(animalId))
+    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+}
+
 // Get bill with all details
 export function getBillWithDetails(billId: number) {
   const bill = getBillById(billId);
