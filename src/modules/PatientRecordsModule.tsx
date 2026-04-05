@@ -5,10 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Search, FileText, Printer, Download, PawPrint, User } from 'lucide-react';
-import { searchPatients } from '@/lib/services/patientService';
+import { getAllPatientsWithAnimals, searchPatients } from '@/lib/services/patientService';
 import { getBillsByAnimalId, getBillWithDetails } from '@/lib/services/billingService';
 import { printPatientRecord, downloadPatientRecordHtml } from '@/lib/printPatientRecord';
-import type { Animal, Bill, Patient } from '@/types';
+import type { Animal, Bill, MedicalRecord, Patient } from '@/types';
 import { toast } from 'sonner';
 
 function formatWhen(iso: unknown): string {
@@ -28,7 +28,7 @@ export function PatientRecordsModule() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<
     { patient: Patient; animals: Animal[]; last_visit?: string }[]
-  >([]);
+  >(() => getAllPatientsWithAnimals());
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [selectedAnimal, setSelectedAnimal] = useState<Animal | null>(null);
   const [bills, setBills] = useState<Bill[]>([]);
@@ -39,10 +39,26 @@ export function PatientRecordsModule() {
     return getBillWithDetails(selectedBillId);
   }, [selectedBillId]);
 
+  const sortedMedicalRecords = useMemo((): MedicalRecord[] => {
+    const rows = detail?.medicalRecords;
+    if (!rows?.length) return [];
+    return [...rows].sort((a, b) => Number(b.id) - Number(a.id));
+  }, [detail?.medicalRecords]);
+
   const handleSearch = () => {
     const q = query.trim();
+    if (q.length === 0) {
+      const all = getAllPatientsWithAnimals();
+      setResults(all);
+      setSelectedPatient(null);
+      setSelectedAnimal(null);
+      setBills([]);
+      setSelectedBillId(null);
+      if (all.length === 0) toast.info('No patients on file yet');
+      return;
+    }
     if (q.length < 2) {
-      toast.error('Type at least 2 characters (owner name or phone)');
+      toast.error('Type at least 2 characters, or clear the box and press Search to list everyone');
       return;
     }
     const r = searchPatients(q);
@@ -71,8 +87,6 @@ export function PatientRecordsModule() {
     setSelectedBillId(billId);
   };
 
-  const mr = detail?.medicalRecords?.[0];
-
   return (
     <div className="space-y-6">
       <Card>
@@ -82,14 +96,14 @@ export function PatientRecordsModule() {
             Patient records
           </CardTitle>
           <p className="text-sm text-slate-600">
-            Search by owner name or phone, open a pet, then a visit to view the full clinical record, print, or
-            download.
+            All owners are listed below. Narrow with search (name or phone), open a pet, then a visit to view the full
+            clinical record, print, or download. Clear the search box and press Search to show everyone again.
           </p>
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-2">
             <Input
-              placeholder="Owner name or phone…"
+              placeholder="Filter by name or phone (optional)…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
@@ -97,13 +111,13 @@ export function PatientRecordsModule() {
             />
             <Button type="button" onClick={handleSearch}>
               <Search className="w-4 h-4 mr-2" />
-              Search
+              Search / show all
             </Button>
           </div>
         </CardContent>
       </Card>
 
-      {results.length > 0 && (
+      {results.length > 0 ? (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
           <Card className="lg:col-span-1">
             <CardHeader className="pb-2">
@@ -205,6 +219,8 @@ export function PatientRecordsModule() {
             </CardContent>
           </Card>
         </div>
+      ) : (
+        <p className="text-sm text-slate-500 text-center py-8">No patients registered yet.</p>
       )}
 
       {detail && selectedBillId != null && (
@@ -227,7 +243,10 @@ export function PatientRecordsModule() {
                 size="sm"
                 onClick={() => {
                   const ok = printPatientRecord(selectedBillId);
-                  if (!ok) toast.error('Could not open print window');
+                  if (!ok)
+                    toast.error(
+                      'Could not open the print window. Allow pop-ups for this site, then try again.'
+                    );
                 }}
               >
                 <Printer className="w-4 h-4 mr-2" />
@@ -249,33 +268,57 @@ export function PatientRecordsModule() {
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-              <div className="rounded-lg border border-slate-200 p-4 space-y-2">
-                <h3 className="font-semibold text-slate-900">General</h3>
-                <Field label="Symptoms" value={mr?.symptoms} />
-                <Field label="Diagnosis" value={mr?.diagnosis} />
-                <Field label="Treatment" value={mr?.treatment} />
-                <Field label="Notes" value={mr?.notes} />
-                <Field label="Follow-up" value={mr?.follow_up_date} />
+            {sortedMedicalRecords.length === 0 ? (
+              <p className="text-sm text-slate-500 rounded-lg border border-dashed border-slate-200 p-6 text-center">
+                No clinical record saved for this visit yet.
+              </p>
+            ) : (
+              <div className="space-y-8">
+                {sortedMedicalRecords.map((mr, idx) => (
+                  <div key={mr.id} className="space-y-4">
+                    {sortedMedicalRecords.length > 1 && (
+                      <div className="rounded-md bg-slate-100 border border-slate-200 px-3 py-2 text-sm text-slate-800">
+                        <span className="font-semibold">
+                          Record {idx + 1} of {sortedMedicalRecords.length}
+                        </span>
+                        {mr.created_at && (
+                          <span className="text-slate-600"> · Saved {formatWhen(mr.created_at)}</span>
+                        )}
+                      </div>
+                    )}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                      <div className="rounded-lg border border-slate-200 p-4 space-y-2">
+                        <h3 className="font-semibold text-slate-900">General</h3>
+                        <Field label="Symptoms" value={mr.symptoms} />
+                        <Field label="Diagnosis" value={mr.diagnosis} />
+                        <Field label="Treatment" value={mr.treatment} />
+                        <Field label="Notes" value={mr.notes} />
+                        <Field label="Follow-up" value={mr.follow_up_date} />
+                      </div>
+                      <div className="rounded-lg border border-slate-200 p-4 space-y-2">
+                        <h3 className="font-semibold text-slate-900">Laboratory</h3>
+                        <Field label="Lab notes" value={mr.laboratory_notes} />
+                        <Field label="Doctor after lab" value={mr.laboratory_examination} />
+                        <Label className="text-slate-600">Images</Label>
+                        <XrayThumbs raw={mr.laboratory_images} />
+                      </div>
+                      <div className="rounded-lg border border-slate-200 p-4 space-y-2 md:col-span-2">
+                        <h3 className="font-semibold text-slate-900">X-Ray</h3>
+                        <Field label="Operator notes" value={mr.xray_notes} />
+                        <Field label="Doctor report" value={mr.xray_examination} />
+                        <Label className="text-slate-600">Images</Label>
+                        <XrayThumbs raw={mr.xray_images} />
+                      </div>
+                      <div className="rounded-lg border border-slate-200 p-4 space-y-2 md:col-span-2">
+                        <h3 className="font-semibold text-slate-900">Surgery</h3>
+                        <Field label="Room notes" value={mr.surgery_notes} />
+                        <Field label="Doctor surgical summary" value={mr.surgery_examination} />
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div className="rounded-lg border border-slate-200 p-4 space-y-2">
-                <h3 className="font-semibold text-slate-900">Laboratory</h3>
-                <Field label="Lab notes" value={mr?.laboratory_notes} />
-                <Field label="Doctor after lab" value={mr?.laboratory_examination} />
-              </div>
-              <div className="rounded-lg border border-slate-200 p-4 space-y-2 md:col-span-2">
-                <h3 className="font-semibold text-slate-900">X-Ray</h3>
-                <Field label="Operator notes" value={mr?.xray_notes} />
-                <Field label="Doctor report" value={mr?.xray_examination} />
-                <Label className="text-slate-600">Images</Label>
-                <XrayThumbs raw={mr?.xray_images} />
-              </div>
-              <div className="rounded-lg border border-slate-200 p-4 space-y-2 md:col-span-2">
-                <h3 className="font-semibold text-slate-900">Surgery</h3>
-                <Field label="Room notes" value={mr?.surgery_notes} />
-                <Field label="Doctor surgical summary" value={mr?.surgery_examination} />
-              </div>
-            </div>
+            )}
 
             <div>
               <h3 className="font-semibold mb-2">Bill items</h3>

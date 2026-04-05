@@ -61,6 +61,17 @@ export function buildPatientRecordHtml(billId: number): string | null {
       </tr>`;
     }).join('') || '';
 
+  const labImgs = mr ? parseXrayImages(mr.laboratory_images) : [];
+  const labImgBlocks =
+    labImgs.length === 0
+      ? ''
+      : `<div class="sec"><h3>Lab images</h3><div class="img-row">${labImgs
+          .map(
+            (src) =>
+              `<div class="img-wrap"><img src="${src.replace(/"/g, '&quot;')}" alt="Lab" /></div>`
+          )
+          .join('')}</div></div>`;
+
   const imgs = mr ? parseXrayImages(mr.xray_images) : [];
   const imgBlocks =
     imgs.length === 0
@@ -118,6 +129,7 @@ export function buildPatientRecordHtml(billId: number): string | null {
   <h2>Laboratory</h2>
   ${section('Lab / technical notes', mr?.laboratory_notes)}
   ${section('Doctor examination after laboratory', mr?.laboratory_examination)}
+  ${labImgBlocks}
 
   <h2>X-Ray</h2>
   ${section('X-ray / operator notes', mr?.xray_notes)}
@@ -145,18 +157,15 @@ export function buildPatientRecordHtml(billId: number): string | null {
 export function printPatientRecord(billId: number): boolean {
   const html = buildPatientRecordHtml(billId);
   if (!html) return false;
-  const w = window.open('', '_blank', 'noopener,noreferrer');
+  // Must not use `noopener` here: many browsers return `null` from window.open, so nothing prints.
+  const htmlPrint = html.replace(
+    '</body>',
+    '<script>window.onload=function(){try{window.focus();window.print();}catch(e){}};<\/script></body>'
+  );
+  const w = window.open('', '_blank', 'width=900,height=800');
   if (!w) return false;
-  w.document.write(html);
+  w.document.write(htmlPrint);
   w.document.close();
-  w.focus();
-  setTimeout(() => {
-    try {
-      w.print();
-    } catch {
-      /* ignore */
-    }
-  }, 250);
   return true;
 }
 

@@ -97,10 +97,29 @@ export function getAnimalsByPatientId(patientId: number): Animal[] {
   return query('SELECT * FROM animals WHERE patient_id = ? ORDER BY created_at DESC', [patientId]) as Animal[];
 }
 
-// Search patients by owner name or phone
+/** Every owner with their animals (newest activity first). Used for patient records browse. */
+export function getAllPatientsWithAnimals(): PatientSearchResult[] {
+  const patients = query('SELECT * FROM patients ORDER BY updated_at DESC') as Patient[];
+
+  return patients.map((patient) => {
+    const animals = getAnimalsByPatientId(patient.id);
+    const lastVisit = getOne(
+      'SELECT MAX(created_at) as last_visit FROM bills WHERE patient_id = ?',
+      [patient.id]
+    );
+
+    return {
+      patient,
+      animals,
+      last_visit: lastVisit?.last_visit,
+    };
+  });
+}
+
+// Search patients by owner name or phone (all matches, no row cap)
 export function searchPatients(searchTerm: string): PatientSearchResult[] {
   const patients = query(
-    'SELECT * FROM patients WHERE owner_name LIKE ? OR owner_phone LIKE ? ORDER BY updated_at DESC LIMIT 20',
+    'SELECT * FROM patients WHERE owner_name LIKE ? OR owner_phone LIKE ? ORDER BY updated_at DESC',
     [`%${searchTerm}%`, `%${searchTerm}%`]
   ) as Patient[];
   

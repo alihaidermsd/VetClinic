@@ -32,7 +32,11 @@ import {
   getTokenById,
 } from '@/lib/services/tokenService';
 import { getBillWithDetails, addBillItem, applyDiscount } from '@/lib/services/billingService';
-import { getMedicalRecordsByBillId, saveMedicalRecordForBill } from '@/lib/services/medicalService';
+import {
+  getMedicalRecordsByBillId,
+  parseImageJsonArray,
+  saveMedicalRecordForBill,
+} from '@/lib/services/medicalService';
 import { getAllRooms } from '@/lib/services/roomService';
 import { useAuth } from '@/hooks/useAuth';
 import type { BillItemFormData, Room, Token } from '@/types';
@@ -46,17 +50,6 @@ const REFERRAL_ROOMS = [
   { value: 'surgery', label: 'Surgery Room' },
   { value: 'pharmacy', label: 'Pharmacy' },
 ];
-
-/** Use the doctor's assigned room from their user profile; avoid always attaching charges to the first doctor room. */
-function parseXrayImagesJson(raw: unknown): string[] {
-  if (raw == null || raw === '') return [];
-  try {
-    const p = JSON.parse(String(raw));
-    return Array.isArray(p) ? p.filter((x) => typeof x === 'string') : [];
-  } catch {
-    return [];
-  }
-}
 
 function resolveDoctorBillRoom(
   rooms: Room[],
@@ -176,7 +169,7 @@ export function DoctorModule() {
       setLaboratoryExamination(latest.laboratory_examination ?? '');
       setXrayNotes(latest.xray_notes ?? '');
       setXrayExamination(latest.xray_examination ?? '');
-      setXrayImageList(parseXrayImagesJson(latest.xray_images));
+      setXrayImageList(parseImageJsonArray(latest.xray_images));
       setSurgeryNotes(latest.surgery_notes ?? '');
       setSurgeryExamination(latest.surgery_examination ?? '');
     } else {
@@ -487,7 +480,7 @@ export function DoctorModule() {
         setLaboratoryExamination(latest.laboratory_examination ?? '');
         setXrayNotes(latest.xray_notes ?? '');
         setXrayExamination(latest.xray_examination ?? '');
-        setXrayImageList(parseXrayImagesJson(latest.xray_images));
+        setXrayImageList(parseImageJsonArray(latest.xray_images));
         setSurgeryNotes(latest.surgery_notes ?? '');
         setSurgeryExamination(latest.surgery_examination ?? '');
       }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ChangeEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,6 +14,7 @@ import {
   X,
   Percent,
   ClipboardList,
+  ImagePlus,
 } from 'lucide-react';
 import {
   getTokenByNumber,
@@ -26,7 +27,11 @@ import {
   completeOperatorRoomVisit,
 } from '@/lib/services/tokenService';
 import { getBillWithDetails, addBillItem, applyDiscount } from '@/lib/services/billingService';
-import { getMedicalRecordsByBillId, upsertMedicalRecordFields } from '@/lib/services/medicalService';
+import {
+  getMedicalRecordsByBillId,
+  parseImageJsonArray,
+  upsertMedicalRecordFields,
+} from '@/lib/services/medicalService';
 import { getAllRooms } from '@/lib/services/roomService';
 import { useAuth } from '@/hooks/useAuth';
 import type { BillItemFormData, Room, RoomType, Token, ItemType, RoomQueueItem } from '@/types';
@@ -86,6 +91,7 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
   const [itemQuantity, setItemQuantity] = useState('1');
   const [billDiscountPercent, setBillDiscountPercent] = useState('');
   const [operatorNotes, setOperatorNotes] = useState('');
+  const [operatorImages, setOperatorImages] = useState<string[]>([]);
 
   useEffect(() => {
     setRooms(getAllRooms());
@@ -137,6 +143,22 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
     if (roomType === 'lab') setOperatorNotes(latest.laboratory_notes ?? '');
     else if (roomType === 'xray') setOperatorNotes(latest.xray_notes ?? '');
     else setOperatorNotes(latest.surgery_notes ?? '');
+  }, [currentBill?.bill?.id, roomType]);
+
+  useEffect(() => {
+    const bid = currentBill?.bill?.id;
+    if (!bid || (roomType !== 'lab' && roomType !== 'xray')) {
+      setOperatorImages([]);
+      return;
+    }
+    const recs = getMedicalRecordsByBillId(bid);
+    const latest = recs[0];
+    if (!latest) {
+      setOperatorImages([]);
+      return;
+    }
+    if (roomType === 'lab') setOperatorImages(parseImageJsonArray(latest.laboratory_images));
+    else setOperatorImages(parseImageJsonArray(latest.xray_images));
   }, [currentBill?.bill?.id, roomType]);
 
   const statusBadgeClass = (status: string) => {
@@ -319,6 +341,45 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
     }
   };
 
+  const removeOperatorImageAt = (index: number) => {
+    setOperatorImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleOperatorImagesChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files?.length) return;
+    const maxImages = 5;
+    const maxBytes = 2 * 1024 * 1024;
+    const next: string[] = [...operatorImages];
+    for (const file of Array.from(files)) {
+      if (next.length >= maxImages) {
+        toast.error(`Maximum ${maxImages} images per visit`);
+        break;
+      }
+      if (!file.type.startsWith('image/')) {
+        toast.error(`${file.name} is not an image`);
+        continue;
+      }
+      if (file.size > maxBytes) {
+        toast.error(`${file.name} is too large (max 2 MB each)`);
+        continue;
+      }
+      try {
+        const dataUrl = await new Promise<string>((res, rej) => {
+          const r = new FileReader();
+          r.onload = () => res(String(r.result || ''));
+          r.onerror = () => rej();
+          r.readAsDataURL(file);
+        });
+        if (dataUrl) next.push(dataUrl);
+      } catch {
+        toast.error('Could not read image');
+      }
+    }
+    setOperatorImages(next);
+    e.target.value = '';
+  };
+
   const handleApplyBillDiscount = () => {
     if (!currentBill?.bill?.id || visitLocked) return;
     const pct = parseFloat(billDiscountPercent);
@@ -366,9 +427,15 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
     }
     const patch =
       roomType === 'lab'
-        ? { laboratory_notes: operatorNotes.trim() ? operatorNotes : null }
+        ? {
+            laboratory_notes: operatorNotes.trim() ? operatorNotes : null,
+            laboratory_images: JSON.stringify(operatorImages),
+          }
         : roomType === 'xray'
-          ? { xray_notes: operatorNotes.trim() ? operatorNotes : null }
+          ? {
+              xray_notes: operatorNotes.trim() ? operatorNotes : null,
+              xray_images: JSON.stringify(operatorImages),
+            }
           : { surgery_notes: operatorNotes.trim() ? operatorNotes : null };
     try {
       upsertMedicalRecordFields(currentBill.bill.id, { id: user.id, name: user.name }, roomId, patch);
@@ -658,6 +725,50 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
                     disabled={visitLocked}
                     className="bg-white"
                   />
+                  {(roomType === 'lab' || roomType === 'xray') && (
+                    <div className="space-y-2 pt-1">
+                      <Label className="flex items-center gap-2 text-slate-800">
+                        <ImagePlus className="w-4 h-4 shrink-0" />
+                        Attach images (max 5, 2 MB each)
+                      </Label>
+                      <p className="text-xs text-slate-500">
+                        Photos of reports, strips, or films — stored in this browser only.
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          className="max-w-xs bg-white"
+                          disabled={visitLocked}
+                          onChange={handleOperatorImagesChange}
+                        />
+                        <span className="text-xs text-slate-500">{operatorImages.length} / 5</span>
+                      </div>
+                      {operatorImages.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {operatorImages.map((src, i) => (
+                            <div
+                              key={i}
+                              className="relative group w-24 h-24 border rounded overflow-hidden bg-white"
+                            >
+                              <img src={src} alt="" className="w-full h-full object-cover" />
+                              {!visitLocked && (
+                                <button
+                                  type="button"
+                                  className="absolute top-1 right-1 bg-red-600 text-white rounded p-0.5 opacity-90 hover:opacity-100"
+                                  onClick={() => removeOperatorImageAt(i)}
+                                  aria-label="Remove image"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <Button
                     type="button"
                     variant="secondary"

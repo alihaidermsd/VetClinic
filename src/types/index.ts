@@ -215,6 +215,8 @@ export interface MedicalRecord {
   laboratory_notes?: string | null;
   /** Doctor interpretation after lab results */
   laboratory_examination?: string | null;
+  /** JSON array of base64 data URLs for lab slips, charts, etc. (stored locally; keep images small) */
+  laboratory_images?: string | null;
   /** X-ray operator notes */
   xray_notes?: string | null;
   /** Doctor examination / report after imaging */

@@ -9,13 +9,24 @@ function datePart(iso: string | undefined | null): string | null {
 }
 
 const MR_INSERT_COLS =
-  'bill_id, patient_id, animal_id, doctor_id, doctor_name, room_id, diagnosis, symptoms, treatment, notes, follow_up_date, laboratory_notes, laboratory_examination, xray_notes, xray_examination, xray_images, surgery_notes, surgery_examination, created_at';
+  'bill_id, patient_id, animal_id, doctor_id, doctor_name, room_id, diagnosis, symptoms, treatment, notes, follow_up_date, laboratory_notes, laboratory_examination, laboratory_images, xray_notes, xray_examination, xray_images, surgery_notes, surgery_examination, created_at';
 
-function normalizeXrayImages(raw: unknown): string {
+/** Stored JSON array of image data URLs (same format for lab and X-ray). */
+function normalizeImageJsonArray(raw: unknown): string {
   if (raw == null || raw === '') return '[]';
   const s = String(raw).trim();
   if (s.startsWith('[')) return s;
   return '[]';
+}
+
+export function parseImageJsonArray(raw: unknown): string[] {
+  if (raw == null || raw === '') return [];
+  try {
+    const p = JSON.parse(String(raw));
+    return Array.isArray(p) ? p.filter((x) => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 /** One logical note per bill: update latest row if present, else insert (avoids duplicate rows on every Save). */
@@ -33,9 +44,10 @@ export function saveMedicalRecordForBill(
       follow_up_date: data.follow_up_date,
       laboratory_notes: data.laboratory_notes,
       laboratory_examination: data.laboratory_examination,
+      laboratory_images: data.laboratory_images != null ? normalizeImageJsonArray(data.laboratory_images) : undefined,
       xray_notes: data.xray_notes,
       xray_examination: data.xray_examination,
-      xray_images: data.xray_images != null ? normalizeXrayImages(data.xray_images) : undefined,
+      xray_images: data.xray_images != null ? normalizeImageJsonArray(data.xray_images) : undefined,
       surgery_notes: data.surgery_notes,
       surgery_examination: data.surgery_examination,
     });
@@ -49,7 +61,7 @@ export function saveMedicalRecordForBill(
 export function createMedicalRecord(data: Omit<MedicalRecord, 'id' | 'created_at'>): MedicalRecord {
   const ts = new Date().toISOString();
   const result = run(
-    `INSERT INTO medical_records (${MR_INSERT_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO medical_records (${MR_INSERT_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       data.bill_id,
       data.patient_id,
@@ -64,9 +76,10 @@ export function createMedicalRecord(data: Omit<MedicalRecord, 'id' | 'created_at
       data.follow_up_date || null,
       data.laboratory_notes ?? null,
       data.laboratory_examination ?? null,
+      normalizeImageJsonArray(data.laboratory_images),
       data.xray_notes ?? null,
       data.xray_examination ?? null,
-      normalizeXrayImages(data.xray_images),
+      normalizeImageJsonArray(data.xray_images),
       data.surgery_notes ?? null,
       data.surgery_examination ?? null,
       ts,
@@ -86,6 +99,7 @@ export function upsertMedicalRecordFields(
       MedicalRecord,
       | 'laboratory_notes'
       | 'laboratory_examination'
+      | 'laboratory_images'
       | 'xray_notes'
       | 'xray_examination'
       | 'xray_images'
@@ -101,8 +115,11 @@ export function upsertMedicalRecordFields(
   if (existing.length > 0) {
     const latest = existing[0];
     const next: Parameters<typeof updateMedicalRecord>[1] = { ...patch };
+    if (patch.laboratory_images !== undefined) {
+      next.laboratory_images = normalizeImageJsonArray(patch.laboratory_images);
+    }
     if (patch.xray_images !== undefined) {
-      next.xray_images = normalizeXrayImages(patch.xray_images);
+      next.xray_images = normalizeImageJsonArray(patch.xray_images);
     }
     const updated = updateMedicalRecord(latest.id, next);
     if (updated) return updated;
@@ -123,9 +140,10 @@ export function upsertMedicalRecordFields(
     follow_up_date: null,
     laboratory_notes: patch.laboratory_notes ?? null,
     laboratory_examination: patch.laboratory_examination ?? null,
+    laboratory_images: patch.laboratory_images != null ? normalizeImageJsonArray(patch.laboratory_images) : '[]',
     xray_notes: patch.xray_notes ?? null,
     xray_examination: patch.xray_examination ?? null,
-    xray_images: patch.xray_images != null ? normalizeXrayImages(patch.xray_images) : '[]',
+    xray_images: patch.xray_images != null ? normalizeImageJsonArray(patch.xray_images) : '[]',
     surgery_notes: patch.surgery_notes ?? null,
     surgery_examination: patch.surgery_examination ?? null,
   });
@@ -173,6 +191,7 @@ export function updateMedicalRecord(id: number, updates: Partial<MedicalRecord>)
     'follow_up_date',
     'laboratory_notes',
     'laboratory_examination',
+    'laboratory_images',
     'xray_notes',
     'xray_examination',
     'xray_images',
