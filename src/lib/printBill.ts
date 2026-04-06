@@ -237,6 +237,7 @@ export function printBillReceipt(d: BillDetailsForPrint): boolean {
   <div class="doc-title">Customer bill / receipt</div>
   ${banner}
   <div class="bill-code">${escapeHtml(bill.bill_code)}</div>
+  <div class="doc-title">Date: ${escapeHtml(dateStr)}</div>
   <div class="meta">
     <div class="row"><span class="label">Customer</span><span class="val">${escapeHtml(owner)}</span></div>
     ${phone ? `<div class="row"><span class="label">Phone</span><span class="val">${escapeHtml(phone)}</span></div>` : ''}
@@ -274,7 +275,7 @@ export function printBillReceipt(d: BillDetailsForPrint): boolean {
   </div>
   ${paymentsBlock}
   <div class="footer">
-    Printed ${escapeHtml(dateStr)} · ${escapeHtml(timeStr)}
+    [Coded by Saqi Dev]
   </div>
   <script>window.onload = function () { window.print(); };</script>
 </body>

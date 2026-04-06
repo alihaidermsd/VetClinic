@@ -1075,8 +1075,8 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
         )}
       </div>
 
-      <aside className="w-full xl:w-96 shrink-0">
-        <Card className="xl:sticky xl:top-4">
+      <aside className="w-full xl:w-96 shrink-0 self-start">
+        <Card className="xl:fixed xl:top-4 xl:right-4 xl:w-96">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 gap-2">
             <CardTitle className="text-base font-semibold flex items-center gap-2 min-w-0">
               <ListOrdered className="w-5 h-5 shrink-0" />

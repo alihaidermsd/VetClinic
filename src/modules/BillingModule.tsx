@@ -312,7 +312,17 @@ export function BillingModule() {
     if (searchTerm.trim()) performSearch(searchTerm);
   };
 
+  const isLineItemEditLocked = (): boolean => {
+    const paidAmount = Number(currentBill?.bill?.paid_amount ?? 0);
+    const hasRecordedPayment = paidAmount > 0;
+    return hasRecordedPayment;
+  };
+
   const startEditItem = (item: any) => {
+    if (isLineItemEditLocked()) {
+      toast.error('Payment is already recorded. Editing line items is locked.');
+      return;
+    }
     setEditingItemId(Number(item.id));
     setEditItemName(String(item.item_name ?? ''));
     setEditItemQty(String(item.quantity ?? 1));
@@ -328,6 +338,11 @@ export function BillingModule() {
 
   const handleSaveItemEdit = (itemId: number) => {
     if (!currentBill?.bill?.id) return;
+    if (isLineItemEditLocked()) {
+      toast.error('Payment is already recorded. Editing line items is locked.');
+      cancelEditItem();
+      return;
+    }
     const name = editItemName.trim();
     const qty = parseInt(editItemQty, 10);
     const price = parseFloat(editItemPrice);
@@ -364,6 +379,10 @@ export function BillingModule() {
 
   const handleDeleteItem = (itemId: number) => {
     if (!currentBill?.bill?.id) return;
+    if (isLineItemEditLocked()) {
+      toast.error('Payment is already recorded. Deleting line items is locked.');
+      return;
+    }
     const ok = window.confirm('Delete this line item?');
     if (!ok) return;
     try {
@@ -397,6 +416,12 @@ export function BillingModule() {
     const payStatus = String(bill?.payment_status ?? '').trim().toLowerCase();
     return billStatus !== 'cancelled' && billStatus !== 'completed' && payStatus !== 'paid';
   };
+
+  useEffect(() => {
+    if (editingItemId != null && isLineItemEditLocked()) {
+      cancelEditItem();
+    }
+  }, [currentBill?.bill?.paid_amount, editingItemId]);
 
   return (
     <div className="flex flex-col xl:flex-row gap-6 items-start">
@@ -782,26 +807,30 @@ export function BillingModule() {
                               <td className="py-2 px-4 text-sm text-right">Rs. {formatRupee(item.unit_price)}</td>
                               <td className="py-2 px-4 text-sm text-right">Rs. {formatRupee(item.total_price)}</td>
                               <td className="py-2 px-4">
-                                <div className="flex justify-end gap-1">
-                                  <Button
-                                    type="button"
-                                    size="icon"
-                                    variant="outline"
-                                    className="h-8 w-8"
-                                    onClick={() => startEditItem(item)}
-                                  >
-                                    <Pencil className="w-4 h-4" />
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    size="icon"
-                                    variant="ghost"
-                                    className="h-8 w-8 text-red-600 hover:text-red-700"
-                                    onClick={() => handleDeleteItem(Number(item.id))}
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </Button>
-                                </div>
+                                {isLineItemEditLocked() ? (
+                                  <span className="block text-right text-xs text-slate-400">Locked</span>
+                                ) : (
+                                  <div className="flex justify-end gap-1">
+                                    <Button
+                                      type="button"
+                                      size="icon"
+                                      variant="outline"
+                                      className="h-8 w-8"
+                                      onClick={() => startEditItem(item)}
+                                    >
+                                      <Pencil className="w-4 h-4" />
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      size="icon"
+                                      variant="ghost"
+                                      className="h-8 w-8 text-red-600 hover:text-red-700"
+                                      onClick={() => handleDeleteItem(Number(item.id))}
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </Button>
+                                  </div>
+                                )}
                               </td>
                             </>
                           )}

@@ -48,6 +48,13 @@ function section(title: string, body: string | null | undefined): string {
 export function buildPatientRecordHtml(billId: number): string | null {
   const d = getBillWithDetails(billId);
   if (!d) return null;
+  const now = new Date();
+  const printDate = now.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+  const printTime = now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 
   const logoUrl = brandLogoUrl();
   const { bill, patient, animal, token, items, medicalRecords } = d;
@@ -154,7 +161,10 @@ export function buildPatientRecordHtml(billId: number): string | null {
     <strong>Patient total:</strong> Rs. ${Number(bill.final_amount || 0).toLocaleString('en-IN')}
     &nbsp;|&nbsp; <strong>Payment:</strong> ${escapeHtml(String(bill.payment_status ?? ''))}
   </p>
-  <p style="margin-top:24px;font-size:0.8rem;color:#94a3b8;">Printed ${formatDate(new Date().toISOString())}</p>
+  <p style="margin-top:24px;font-size:0.8rem;color:#94a3b8;">
+    Print date: ${escapeHtml(printDate)}<br/>
+    Print time: ${escapeHtml(printTime)}
+  </p>
 </body>
 </html>`;
 }

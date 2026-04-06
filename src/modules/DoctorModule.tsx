@@ -29,7 +29,6 @@ import {
   getTokenByNumber,
   getTokenWithDetails,
   referPatientToRooms,
-  startToken,
   completeToken,
   getTodayTokensForDoctorQueue,
   getTokenById,
@@ -81,6 +80,7 @@ function resolveDoctorBillRoom(
 }
 
 export function DoctorModule() {
+  type QueueTab = 'waiting' | 'in_progress' | 'completed' | 'all';
   const { user } = useAuth();
   const [tokenNumber, setTokenNumber] = useState('');
   const [currentToken, setCurrentToken] = useState<any>(null);
@@ -88,6 +88,7 @@ export function DoctorModule() {
   const [tokenQueue, setTokenQueue] = useState<ReturnType<typeof getTodayTokensForDoctorQueue>>([]);
   const [rooms, setRooms] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState('examination');
+  const [queueTab, setQueueTab] = useState<QueueTab>('waiting');
 
   // Medical record form
   const [diagnosis, setDiagnosis] = useState('');
@@ -198,7 +199,7 @@ export function DoctorModule() {
     setRooms(allRooms);
   };
 
-  /** Load examination UI for a token; starts visit only when status is `waiting`. */
+  /** Load examination UI for a token without changing queue status. */
   const loadVisitForToken = (token: Token, options?: { silent?: boolean }): boolean => {
     if (token.status === 'cancelled') {
       toast.error('This token is cancelled');
@@ -219,14 +220,6 @@ export function DoctorModule() {
 
     setCurrentToken(tokenDetails);
     setCurrentBill(billDetails);
-
-    if (token.status === 'waiting') {
-      startToken(token.id);
-      const refreshedBill = getBillWithDetails(token.bill_id) || billDetails;
-      setCurrentBill(refreshedBill);
-      const refreshedToken = getTokenWithDetails(token.id);
-      if (refreshedToken) setCurrentToken(refreshedToken);
-    }
 
     refreshTokenQueue();
     if (!options?.silent) {
@@ -291,6 +284,11 @@ export function DoctorModule() {
 
   const visitLocked =
     currentToken?.token?.status === 'completed' || currentToken?.token?.status === 'cancelled';
+
+  const visibleTokenQueue =
+    queueTab === 'all'
+      ? tokenQueue
+      : tokenQueue.filter((row) => row.status === queueTab);
 
   const canModifyBillItem = (item: any): boolean => {
     if (!user) return false;
@@ -1288,8 +1286,8 @@ export function DoctorModule() {
       </div>
 
       {/* Today's token queue */}
-      <aside className="w-full xl:w-80 shrink-0">
-        <Card className="xl:sticky xl:top-4">
+      <aside className="w-full xl:w-80 shrink-0 self-start">
+        <Card className="xl:fixed xl:top-4 xl:right-4 xl:w-80">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-base font-semibold flex items-center gap-2">
               <ListOrdered className="w-5 h-5" />
@@ -1304,11 +1302,19 @@ export function DoctorModule() {
               Patients who start at the doctor. Walk-ins sent straight to lab, X-ray, surgery, or pharmacy appear only in
               those departments.
             </p>
-            {tokenQueue.length === 0 ? (
+            <Tabs value={queueTab} onValueChange={(v) => setQueueTab(v as QueueTab)} className="mb-3">
+              <TabsList className="w-full grid grid-cols-4 h-auto p-1 gap-1">
+                <TabsTrigger value="waiting" className="text-xs px-1.5 py-2">Waiting</TabsTrigger>
+                <TabsTrigger value="in_progress" className="text-xs px-1.5 py-2">In progress</TabsTrigger>
+                <TabsTrigger value="completed" className="text-xs px-1.5 py-2">Completed</TabsTrigger>
+                <TabsTrigger value="all" className="text-xs px-1.5 py-2">All</TabsTrigger>
+              </TabsList>
+            </Tabs>
+            {visibleTokenQueue.length === 0 ? (
               <p className="text-sm text-slate-500 py-6 text-center">No tokens for today yet.</p>
             ) : (
               <ul className="max-h-[min(70vh,32rem)] overflow-y-auto space-y-1 pr-1 -mr-1">
-                {tokenQueue.map((row) => {
+                {visibleTokenQueue.map((row) => {
                   const active = currentToken?.token?.id === row.id;
                   return (
                     <li key={row.id}>

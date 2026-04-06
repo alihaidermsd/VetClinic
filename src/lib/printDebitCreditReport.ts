@@ -26,10 +26,12 @@ function capMethod(m: string): string {
 export function printMonthlyDebitCreditReport(report: MonthlyDebitCreditReport): boolean {
   const logoUrl = brandLogoUrl();
   const now = new Date();
-  const printed = now.toLocaleString(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
+  const printDate = now.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
   });
+  const printTime = now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 
   const rowsCredit = report.credit_lines
     .map(
@@ -115,7 +117,7 @@ export function printMonthlyDebitCreditReport(report: MonthlyDebitCreditReport):
     <img src="${esc(logoUrl)}" alt="" />
     <h1>Monthly debit &amp; credit</h1>
     <p class="sub">${esc(report.month_label)} · ${esc(report.range_start)} to ${esc(report.range_end)}</p>
-    <p class="sub">Printed ${esc(printed)}</p>
+    <p class="sub">Print date: ${esc(printDate)} · Print time: ${esc(printTime)}</p>
   </div>
 
   <div class="summary">

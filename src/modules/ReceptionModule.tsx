@@ -18,6 +18,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Ticket, Printer, Search, RefreshCw, User, Phone, PawPrint, XCircle } from 'lucide-react';
 import { createWalkInPatient, searchPatients } from '@/lib/services/patientService';
 import {
@@ -42,6 +43,7 @@ const RECEPTION_SPECIES_OPTIONS: { value: AnimalType; label: string }[] = [
 ];
 
 type DirectDept = Extract<RoomType, 'lab' | 'xray' | 'surgery' | 'pharmacy'>;
+type TokenTab = 'waiting' | 'in_progress' | 'completed' | 'all';
 
 const DIRECT_DEPT_OPTIONS: { value: DirectDept; label: string }[] = [
   { value: 'lab', label: 'Laboratory' },
@@ -73,6 +75,7 @@ export function ReceptionModule() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [tokenTab, setTokenTab] = useState<TokenTab>('waiting');
 
   useEffect(() => {
     refreshQueue();
@@ -200,7 +203,7 @@ export function ReceptionModule() {
   };
 
   const handleCancelToken = (row: ReceptionTokenRow) => {
-    if (row.status === 'completed' || row.status === 'cancelled') {
+    if (row.status !== 'waiting') {
       toast.message(`Token #${row.token_number} cannot be cancelled`);
       return;
     }
@@ -226,6 +229,10 @@ export function ReceptionModule() {
     };
     return styles[status] || 'bg-gray-100 text-gray-800';
   };
+
+  const visibleQueue = tokenTab === 'all'
+    ? queue
+    : queue.filter((row) => row.status === tokenTab);
 
   return (
     <div className="flex flex-col xl:flex-row gap-6 max-w-6xl mx-auto p-4 items-start">
@@ -465,8 +472,8 @@ export function ReceptionModule() {
         </div>
       </div>
 
-      <aside className="w-full xl:w-96 shrink-0">
-        <Card className="xl:sticky xl:top-4">
+      <aside className="w-full xl:w-96 shrink-0 self-start">
+        <Card className="xl:fixed xl:top-4 xl:right-4 xl:w-96">
         <CardHeader className="flex flex-row items-center justify-between pb-2">
           <CardTitle className="text-lg">Today&apos;s tokens</CardTitle>
           <Button type="button" variant="outline" size="sm" onClick={refreshQueue}>
@@ -475,11 +482,19 @@ export function ReceptionModule() {
           </Button>
         </CardHeader>
         <CardContent className="pt-0">
-          {queue.length === 0 ? (
+          <Tabs value={tokenTab} onValueChange={(v) => setTokenTab(v as TokenTab)} className="mb-3">
+            <TabsList className="w-full grid grid-cols-4 h-auto p-1 gap-1">
+              <TabsTrigger value="waiting" className="text-xs px-1.5 py-2">Waiting</TabsTrigger>
+              <TabsTrigger value="in_progress" className="text-xs px-1.5 py-2">In progress</TabsTrigger>
+              <TabsTrigger value="completed" className="text-xs px-1.5 py-2">Completed</TabsTrigger>
+              <TabsTrigger value="all" className="text-xs px-1.5 py-2">All</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          {visibleQueue.length === 0 ? (
             <p className="text-center text-slate-500 py-8">No tokens yet today.</p>
           ) : (
             <ul className="max-h-[min(70vh,32rem)] overflow-y-auto space-y-1 pr-1 -mr-1">
-              {queue.map((row) => (
+              {visibleQueue.map((row) => (
                 <li key={row.id}>
                   <div className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -502,7 +517,7 @@ export function ReceptionModule() {
                           <Printer className="w-3.5 h-3.5 mr-1" />
                           Print
                         </Button>
-                        {row.status !== 'completed' && row.status !== 'cancelled' && (
+                        {row.status === 'waiting' && (
                           <Button
                             type="button"
                             variant="ghost"

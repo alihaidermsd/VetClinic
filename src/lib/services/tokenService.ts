@@ -587,6 +587,8 @@ export function completeToken(tokenId: number): Token | null {
 
 // Cancel token
 export function cancelToken(tokenId: number): Token | null {
+  const token = getTokenById(tokenId);
+  if (!token || token.status !== 'waiting') return null;
   cancelOpenReferralsForToken(tokenId);
   return updateTokenStatus(tokenId, 'cancelled');
 }

@@ -58,6 +58,7 @@ function formatRupee(value: unknown): string {
 }
 
 export function PharmacyModule() {
+  type QueueTab = 'waiting' | 'in_progress' | 'completed' | 'all';
   const { user } = useAuth();
   const [currentBill, setCurrentBill] = useState<any>(null);
   const [dispenseBills, setDispenseBills] = useState<any[]>([]);
@@ -73,6 +74,7 @@ export function PharmacyModule() {
   const [editItemQty, setEditItemQty] = useState('');
   const [editItemPrice, setEditItemPrice] = useState('');
   const [referralQueue, setReferralQueue] = useState<RoomQueueItem[]>([]);
+  const [queueTab, setQueueTab] = useState<QueueTab>('all');
 
   const refreshReferralQueue = () => {
     try {
@@ -109,6 +111,11 @@ export function PharmacyModule() {
     !isBillPendingForPharmacy(currentBill?.bill) ||
     currentBill?.token?.status === 'completed' ||
     currentBill?.token?.status === 'cancelled';
+
+  const visibleReferralQueue =
+    queueTab === 'all'
+      ? referralQueue
+      : referralQueue.filter((row) => row.status === queueTab);
 
   const canModifyBillItem = (item: any): boolean => {
     if (!user) return false;
@@ -542,7 +549,7 @@ export function PharmacyModule() {
               </CardContent>
             </Card>
 
-            <Card className="border-violet-200 bg-violet-50/40">
+            <Card className="border-violet-200 bg-violet-50/40 self-start xl:fixed xl:top-4 xl:right-4 xl:w-[22rem]">
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between gap-2">
                   <CardTitle className="flex items-center gap-2 text-base">
@@ -565,11 +572,19 @@ export function PharmacyModule() {
                 </p>
               </CardHeader>
               <CardContent>
+                <Tabs value={queueTab} onValueChange={(v) => setQueueTab(v as QueueTab)} className="mb-3">
+                  <TabsList className="w-full grid grid-cols-4 h-auto p-1 gap-1">
+                    <TabsTrigger value="waiting" className="text-xs px-1.5 py-2">Waiting</TabsTrigger>
+                    <TabsTrigger value="in_progress" className="text-xs px-1.5 py-2">In progress</TabsTrigger>
+                    <TabsTrigger value="completed" className="text-xs px-1.5 py-2">Completed</TabsTrigger>
+                    <TabsTrigger value="all" className="text-xs px-1.5 py-2">All</TabsTrigger>
+                  </TabsList>
+                </Tabs>
                 <div className="max-h-48 overflow-y-auto space-y-1 pr-1 -mr-1">
-                  {referralQueue.length === 0 ? (
+                  {visibleReferralQueue.length === 0 ? (
                     <p className="text-sm text-slate-500 py-4 text-center">No patients in pharmacy queue.</p>
                   ) : (
-                    referralQueue.map((row) => (
+                    visibleReferralQueue.map((row) => (
                       <button
                         key={row.token_id}
                         type="button"
