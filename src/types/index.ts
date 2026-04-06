@@ -380,7 +380,45 @@ export interface MonthlyDebitCreditDebitLine {
   notes?: string | null;
 }
 
-/** Monthly cash-basis credit vs debit, aligned with dashboard payment and payroll logic. */
+/** Categories for clinic operating expenses (rent, fuel, daily costs, etc.). */
+export type ExpenseCategory =
+  | 'daily'
+  | 'rent'
+  | 'fuel'
+  | 'utilities'
+  | 'supplies'
+  | 'salary'
+  | 'other';
+
+export type ExpensePaymentMethod = 'cash' | 'card' | 'online' | 'bank' | 'other';
+
+/** Stored expense payment (cash out). Staff payroll remains in `salary_payments`. */
+export interface ExpenseRecord {
+  id: number;
+  category: ExpenseCategory;
+  title: string;
+  amount: number;
+  paid_at: string;
+  payment_method: ExpensePaymentMethod;
+  notes?: string | null;
+  recorded_by_user_id?: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One operating-expense row for monthly debit/credit. */
+export interface MonthlyDebitCreditExpenseLine {
+  id: number;
+  category: ExpenseCategory;
+  category_label: string;
+  title: string;
+  amount: number;
+  paid_at: string;
+  payment_method: string;
+  notes?: string | null;
+}
+
+/** Monthly cash-basis credit vs debit, aligned with dashboard payment, payroll, and expenses. */
 export interface MonthlyDebitCreditReport {
   year: number;
   month: number;
@@ -392,13 +430,21 @@ export interface MonthlyDebitCreditReport {
   credit_payment_count: number;
   credit_by_method: { payment_method: string; total_amount: number; count: number }[];
   credit_lines: MonthlyDebitCreditCreditLine[];
-  /** Sum of salary payouts with paid_at in this month. */
-  debit_total: number;
-  debit_payment_count: number;
+  /** Salary payouts with paid_at in this month (Staff module). */
+  salary_debit_total: number;
+  salary_payout_count: number;
   debit_lines: MonthlyDebitCreditDebitLine[];
+  /** Operating expenses with paid_at in this month (Expenses page). */
+  expense_debit_total: number;
+  expense_entry_count: number;
+  expense_lines: MonthlyDebitCreditExpenseLine[];
+  /** Total cash out: salary + operating expenses. */
+  debit_total: number;
+  /** Salary + expense line count (for summaries). */
+  debit_payment_count: number;
   /** Net billed from closed bills in this month (same rules as Period report). */
   net_billed_closed_bills: number;
-  /** credit_total − debit_total */
+  /** credit_total − debit_total (full outflows). */
   net_position: number;
 }
 

@@ -218,9 +218,9 @@ export function RoleDashboardHome({ userId, role, userName, roleLabel, links }: 
             </div>
             <h3 className="text-sm font-medium text-slate-500 uppercase tracking-wide mt-8 mb-3 flex items-center gap-2">
               <Banknote className="w-4 h-4" />
-              Income &amp; salary (clinic)
+              Income, payroll &amp; expenses (clinic)
             </h3>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
               <Card className="border-slate-200 border-l-4 border-l-green-500">
                 <CardContent className="p-4">
                   <p className="text-xs text-slate-500">Today&apos;s revenue (gross)</p>
@@ -239,6 +239,17 @@ export function RoleDashboardHome({ userId, role, userName, roleLabel, links }: 
                   </p>
                 </CardContent>
               </Card>
+              <Card className="border-slate-200 border-l-4 border-l-amber-500">
+                <CardContent className="p-4">
+                  <p className="text-xs text-slate-500 flex items-center gap-1">
+                    <TrendingDown className="w-3.5 h-3.5" /> Other expenses today
+                  </p>
+                  <p className="text-xl font-bold text-amber-800 mt-1 tabular-nums">
+                    {formatInr(payload.today_expenses_paid)}
+                  </p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Rent, fuel, etc.</p>
+                </CardContent>
+              </Card>
               <Card className="border-slate-200 border-l-4 border-l-emerald-600">
                 <CardContent className="p-4">
                   <p className="text-xs text-slate-500">Net today</p>
@@ -249,6 +260,7 @@ export function RoleDashboardHome({ userId, role, userName, roleLabel, links }: 
                   >
                     {formatInr(payload.today_net_income)}
                   </p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">After payroll &amp; expenses</p>
                 </CardContent>
               </Card>
               <Card className="border-slate-200 border-l-4 border-l-violet-500">
@@ -258,6 +270,15 @@ export function RoleDashboardHome({ userId, role, userName, roleLabel, links }: 
                     {formatInr(payload.month_salary_paid)}
                   </p>
                   <p className="text-[10px] text-slate-400 mt-0.5">By payment date</p>
+                </CardContent>
+              </Card>
+              <Card className="border-slate-200 border-l-4 border-l-orange-500">
+                <CardContent className="p-4">
+                  <p className="text-xs text-slate-500">Operating expenses (this month)</p>
+                  <p className="text-xl font-bold text-orange-900 mt-1 tabular-nums">
+                    {formatInr(payload.month_expenses_paid)}
+                  </p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Expenses page · by paid date</p>
                 </CardContent>
               </Card>
             </div>

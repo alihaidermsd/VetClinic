@@ -57,6 +57,19 @@ export function printMonthlyDebitCreditReport(report: MonthlyDebitCreditReport):
     )
     .join('');
 
+  const rowsExpense = report.expense_lines
+    .map(
+      (r) => `
+    <tr>
+      <td>${esc(r.category_label)}</td>
+      <td>${esc(r.title)}</td>
+      <td class="num">${formatRs(r.amount)}</td>
+      <td>${capMethod(r.payment_method)}</td>
+      <td class="small">${esc(new Date(r.paid_at).toLocaleString())}</td>
+    </tr>`
+    )
+    .join('');
+
   const methodRows = report.credit_by_method
     .map(
       (m) => `
@@ -112,9 +125,9 @@ export function printMonthlyDebitCreditReport(report: MonthlyDebitCreditReport):
       <div class="sub">${report.credit_payment_count} payment entries</div>
     </div>
     <div class="sum-cell debit">
-      <h3>Debit (salary paid)</h3>
+      <h3>Debit (payroll + expenses)</h3>
       <div class="big">Rs. ${formatRs(report.debit_total)}</div>
-      <div class="sub">${report.debit_payment_count} payouts</div>
+      <div class="sub">Salary Rs. ${formatRs(report.salary_debit_total)} · Exp. Rs. ${formatRs(report.expense_debit_total)} · ${report.debit_payment_count} lines</div>
     </div>
     <div class="sum-cell net">
       <h3>Net position</h3>
@@ -142,7 +155,7 @@ export function printMonthlyDebitCreditReport(report: MonthlyDebitCreditReport):
     <tbody>${rowsCredit || '<tr><td colspan="5">No payments in this month</td></tr>'}</tbody>
   </table>
 
-  <h2>Debit — salary payouts</h2>
+  <h2>Debit — staff payroll</h2>
   <table>
     <thead>
       <tr><th>Staff</th><th>Amount</th><th>Method</th><th>Paid at</th><th>Salary period</th></tr>
@@ -150,7 +163,15 @@ export function printMonthlyDebitCreditReport(report: MonthlyDebitCreditReport):
     <tbody>${rowsDebit || '<tr><td colspan="5">No salary payouts in this month</td></tr>'}</tbody>
   </table>
 
-  <p class="note">Animal Care Hospital — internal statement. Figures are derived from stored payments and salary records.</p>
+  <h2>Debit — operating expenses</h2>
+  <table>
+    <thead>
+      <tr><th>Category</th><th>Description</th><th>Amount</th><th>Method</th><th>Paid at</th></tr>
+    </thead>
+    <tbody>${rowsExpense || '<tr><td colspan="5">No operating expenses in this month</td></tr>'}</tbody>
+  </table>
+
+  <p class="note">Animal Care Hospital — internal statement. Figures use payments, salary payouts, and expense entries.</p>
   <script>window.onload = function() { window.print(); };</script>
 </body>
 </html>`;

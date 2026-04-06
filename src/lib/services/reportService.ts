@@ -9,7 +9,10 @@ import type {
   MonthlyDebitCreditReport,
   MonthlyDebitCreditCreditLine,
   MonthlyDebitCreditDebitLine,
+  MonthlyDebitCreditExpenseLine,
+  ExpenseCategory,
 } from '@/types';
+import { expenseCategoryLabel } from './expenseService';
 import { getClinicDateString, isTokenFromToday } from './tokenService';
 
 function datePart(iso: string | undefined | null): string | null {
@@ -205,7 +208,13 @@ export function getDashboardStats() {
   const today_salary_paid = salaryRows
     .filter((p) => isDashboardCalendarDay(p.paid_at, clinicToday, utcToday))
     .reduce((s, p) => s + (Number(p.amount) || 0), 0);
-  const today_net_income = today_revenue - today_salary_paid;
+
+  const expenseRows = listTable('expenses') as any[];
+  const today_expenses_paid = expenseRows
+    .filter((e) => isDashboardCalendarDay(e.paid_at, clinicToday, utcToday))
+    .reduce((s, e) => s + (Number(e.amount) || 0), 0);
+
+  const today_net_income = today_revenue - today_salary_paid - today_expenses_paid;
 
   const ym = clinicToday.slice(0, 7);
   const monthStart = `${ym}-01`;
@@ -219,6 +228,15 @@ export function getDashboardStats() {
       (parts.local >= monthStart && parts.local <= monthEnd) ||
       (parts.utc >= monthStart && parts.utc <= monthEnd);
     return hit ? s + (Number(p.amount) || 0) : s;
+  }, 0);
+
+  const month_expenses_paid = expenseRows.reduce((s, e) => {
+    const parts = getYmdParts(e.paid_at);
+    if (!parts) return s;
+    const hit =
+      (parts.local >= monthStart && parts.local <= monthEnd) ||
+      (parts.utc >= monthStart && parts.utc <= monthEnd);
+    return hit ? s + (Number(e.amount) || 0) : s;
   }, 0);
 
   const inventoryRows = listTable('inventory');
@@ -255,8 +273,10 @@ export function getDashboardStats() {
     today_tokens,
     today_revenue,
     today_salary_paid,
+    today_expenses_paid,
     today_net_income,
     month_salary_paid,
+    month_expenses_paid,
     pending_tokens,
     low_stock_items,
     waiting_patients,
@@ -492,9 +512,9 @@ export function getMonthlyReport(year: number, month: number) {
 }
 
 /**
- * Monthly credit (cash in) vs debit (salary out).
+ * Monthly credit (cash in) vs debit (cash out).
  * - Credit: sum of `payments.amount` dated in the month, only where the linked bill is not cancelled.
- * - Debit: sum of `salary_payments.amount` with `paid_at` in the month.
+ * - Debit: sum of `salary_payments.amount` with `paid_at` in the month, plus `expenses.amount` with `paid_at` in the month.
  * - Net billed: closed-bill revenue for the month (same attribution as Period report).
  */
 export function getMonthlyDebitCreditReport(year: number, month: number): MonthlyDebitCreditReport {
@@ -577,7 +597,38 @@ export function getMonthlyDebitCreditReport(year: number, month: number): Monthl
 
   debit_lines.sort((a, b) => String(b.paid_at).localeCompare(String(a.paid_at)));
 
-  const debit_total = roundMoney(debit_lines.reduce((s, r) => s + r.amount, 0));
+  const salary_debit_total = roundMoney(debit_lines.reduce((s, r) => s + r.amount, 0));
+
+  const expenseRowsRaw = listTable('expenses') as any[];
+  const expense_lines: MonthlyDebitCreditExpenseLine[] = [];
+  const validCats: ExpenseCategory[] = [
+    'daily',
+    'rent',
+    'fuel',
+    'utilities',
+    'supplies',
+    'salary',
+    'other',
+  ];
+  for (const ex of expenseRowsRaw) {
+    if (!isIsoInClosedRange(ex.paid_at, range_start, range_end)) continue;
+    const rawCat = String(ex.category ?? 'other').toLowerCase();
+    const cat = (validCats.includes(rawCat as ExpenseCategory) ? rawCat : 'other') as ExpenseCategory;
+    expense_lines.push({
+      id: Number(ex.id),
+      category: cat,
+      category_label: expenseCategoryLabel(cat),
+      title: String(ex.title ?? '—'),
+      amount: roundMoney(Number(ex.amount) || 0),
+      paid_at: String(ex.paid_at ?? ''),
+      payment_method: String(ex.payment_method ?? 'cash'),
+      notes: ex.notes ?? null,
+    });
+  }
+  expense_lines.sort((a, b) => String(b.paid_at).localeCompare(String(a.paid_at)));
+
+  const expense_debit_total = roundMoney(expense_lines.reduce((s, r) => s + r.amount, 0));
+  const debit_total = roundMoney(salary_debit_total + expense_debit_total);
 
   const rangeSummary = getDateRangeReport(range_start, range_end).summary;
   const net_billed_closed_bills = roundMoney(Number(rangeSummary.net_revenue) || 0);
@@ -592,9 +643,14 @@ export function getMonthlyDebitCreditReport(year: number, month: number): Monthl
     credit_payment_count: creditLinesRaw.length,
     credit_by_method,
     credit_lines: creditLinesRaw,
-    debit_total,
-    debit_payment_count: debit_lines.length,
+    salary_debit_total,
+    salary_payout_count: debit_lines.length,
     debit_lines,
+    expense_debit_total,
+    expense_entry_count: expense_lines.length,
+    expense_lines,
+    debit_total,
+    debit_payment_count: debit_lines.length + expense_lines.length,
     net_billed_closed_bills,
     net_position: roundMoney(credit_total - debit_total),
   };
@@ -633,8 +689,8 @@ export function getYearlyReport(year: number) {
 // Export data for backup
 export function exportAllData() {
   const tables = [
-    'users', 'rooms', 'patients', 'animals', 'tokens', 'bills', 
-    'bill_items', 'inventory', 'medical_records', 'payments', 'audit_logs'
+    'users', 'rooms', 'patients', 'animals', 'tokens', 'bills',
+    'bill_items', 'inventory', 'medical_records', 'payments', 'audit_logs', 'salary_payments', 'expenses',
   ];
   
   const data: Record<string, any[]> = {};

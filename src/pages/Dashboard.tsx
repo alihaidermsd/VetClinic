@@ -7,6 +7,7 @@ import {
   Pill,
   CreditCard,
   BarChart3,
+  Receipt,
   Settings,
   LogOut,
   Stethoscope,
@@ -26,6 +27,7 @@ import { InventoryModule } from '@/modules/InventoryModule';
 import { ReportsModule } from '@/modules/ReportsModule';
 import { AdminModule } from '@/modules/AdminModule';
 import { StaffModule } from '@/modules/StaffModule';
+import { ExpenseModule } from '@/modules/ExpenseModule';
 import { PatientRecordsModule } from '@/modules/PatientRecordsModule';
 import { LabModule, XRayModule, SurgeryModule } from '@/modules/RoomOperatorModule';
 import { DashboardHome } from '@/modules/DashboardHome';
@@ -47,6 +49,7 @@ type ModuleType =
   | 'reports'
   | 'patient_records'
   | 'staff'
+  | 'expense'
   | 'admin';
 
 const MODULE_IDS: ModuleType[] = [
@@ -60,6 +63,7 @@ const MODULE_IDS: ModuleType[] = [
   'pharmacy',
   'inventory',
   'reports',
+  'expense',
   'patient_records',
   'staff',
   'admin',
@@ -95,6 +99,7 @@ const MODULE_NAV_ITEMS: NavItem[] = [
   { id: 'pharmacy', label: 'Pharmacy', icon: Pill, permission: 'pharmacy', access: 'permission' },
   { id: 'inventory', label: 'Inventory', icon: Package, permission: 'inventory', access: 'permission' },
   { id: 'reports', label: 'Reports', icon: BarChart3, permission: 'reports', access: 'permission' },
+  { id: 'expense', label: 'Expenses', icon: Receipt, permission: 'reports', access: 'permission' },
   {
     id: 'patient_records',
     label: 'Patient records',
@@ -116,8 +121,10 @@ const EMPTY_DASHBOARD_STATS = {
   today_tokens: 0,
   today_revenue: 0,
   today_salary_paid: 0,
+  today_expenses_paid: 0,
   today_net_income: 0,
   month_salary_paid: 0,
+  month_expenses_paid: 0,
   pending_tokens: 0,
   low_stock_items: 0,
   waiting_patients: 0,
@@ -280,6 +287,15 @@ export function Dashboard() {
         return <InventoryModule />;
       case 'reports':
         return <ReportsModule />;
+      case 'expense':
+        return checkPermission('reports') && user?.id ? (
+          <ExpenseModule currentUserId={user.id} />
+        ) : (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-amber-900">
+            <p className="font-medium">Access restricted</p>
+            <p className="text-sm mt-1 text-amber-800">You do not have permission to open Expenses.</p>
+          </div>
+        );
       case 'patient_records':
         return <PatientRecordsModule />;
       case 'staff':
@@ -310,28 +326,28 @@ export function Dashboard() {
   };
 
   return (
-    <div className="dashboard-root flex min-h-screen bg-background">
+    <div className="dashboard-root flex h-screen min-h-0 overflow-hidden bg-background">
       <div className="print-only print-page-brand w-full max-w-[220px] mx-auto py-3">
         <BrandLogo variant="print" alt="" />
       </div>
 
-      {/* Sidebar */}
-      <aside className="flex w-64 flex-col border-r border-border bg-card no-print shadow-[1px_0_0_rgba(94,48,85,0.04)]">
-        {/* Logo — links to dashboard */}
-        <div className="p-4 border-b border-border bg-muted/20">
+      {/* Sidebar: logo + user fixed; nav scrolls on its own */}
+      <aside className="flex h-full min-h-0 w-64 shrink-0 flex-col border-r border-border bg-card no-print shadow-[1px_0_0_rgba(94,48,85,0.04)]">
+        {/* Logo — full card, links to dashboard */}
+        <div className="shrink-0 border-b border-border bg-muted/20 p-4">
           <a
             href={hashHrefForModule('dashboard')}
-            className="group flex flex-col rounded-xl p-1 -m-1 transition-colors no-underline text-inherit outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 hover:bg-muted/40"
+            className="group flex flex-col gap-3 rounded-xl no-underline text-inherit outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
           >
-            <BrandLogo variant="sidebar" alt="Animal Care Hospital — go to dashboard" />
-            <p className="mt-3 text-center text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+            <BrandLogo variant="dashboard" alt="Animal Care Hospital — go to dashboard" />
+            <p className="text-center text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
               Management system
             </p>
           </a>
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+        {/* Navigation — independent scroll */}
+        <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-y-contain p-4">
           {MODULE_NAV_ITEMS.map((item) => {
             if (!navItemHasAccess(item, user?.role, checkPermission)) return null;
 
@@ -354,7 +370,7 @@ export function Dashboard() {
         </nav>
 
         {/* User Info */}
-        <div className="p-4 border-t border-slate-200">
+        <div className="shrink-0 border-t border-slate-200 p-4">
           <div className="flex items-center gap-3 mb-3">
             <div className="w-10 h-10 bg-slate-200 rounded-full flex items-center justify-center">
               <UserCircle className="w-6 h-6 text-slate-500" />
@@ -377,7 +393,7 @@ export function Dashboard() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col overflow-hidden">
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {/* Header */}
         <header className="border-b border-border bg-card px-6 py-4 no-print">
           <div className="flex items-center justify-between">
@@ -411,6 +427,12 @@ export function Dashboard() {
                     <p className="text-slate-500">Salary paid today</p>
                     <p className="font-semibold text-rose-600">
                       Rs. {Number(stats?.today_salary_paid ?? 0).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-slate-500">Expenses today</p>
+                    <p className="font-semibold text-amber-800">
+                      Rs. {Number(stats?.today_expenses_paid ?? 0).toLocaleString()}
                     </p>
                   </div>
                   <div className="text-center">

@@ -67,11 +67,27 @@ function debitCreditToCsvRecords(r: MonthlyDebitCreditReport): Record<string, st
     extra: '',
   });
   out.push({
-    section: 'Debit total',
+    section: 'Debit total (all outflows)',
     kind: '',
     ref: '',
     amount: r.debit_total,
-    detail: `${r.debit_payment_count} payouts`,
+    detail: `${r.debit_payment_count} lines (salary + expenses)`,
+    extra: '',
+  });
+  out.push({
+    section: '  — Salary debit',
+    kind: '',
+    ref: '',
+    amount: r.salary_debit_total,
+    detail: `${r.salary_payout_count} payouts`,
+    extra: '',
+  });
+  out.push({
+    section: '  — Operating expenses',
+    kind: '',
+    ref: '',
+    amount: r.expense_debit_total,
+    detail: `${r.expense_entry_count} entries`,
     extra: '',
   });
   out.push({
@@ -101,15 +117,26 @@ function debitCreditToCsvRecords(r: MonthlyDebitCreditReport): Record<string, st
       extra: line.received_by_name,
     });
   }
-  out.push({ section: 'DEBIT_LINES', kind: '', ref: '', amount: '', detail: '', extra: '' });
+  out.push({ section: 'DEBIT_SALARY', kind: '', ref: '', amount: '', detail: '', extra: '' });
   for (const line of r.debit_lines) {
     out.push({
-      section: 'debit',
+      section: 'debit_salary',
       kind: line.payment_method,
       ref: line.staff_name,
       amount: line.amount,
       detail: line.paid_at,
       extra: `${line.period_start}–${line.period_end}`,
+    });
+  }
+  out.push({ section: 'DEBIT_EXPENSES', kind: '', ref: '', amount: '', detail: '', extra: '' });
+  for (const line of r.expense_lines) {
+    out.push({
+      section: 'debit_expense',
+      kind: line.payment_method,
+      ref: line.title,
+      amount: line.amount,
+      detail: line.paid_at,
+      extra: `${line.category_label}`,
     });
   }
   return out;
@@ -769,8 +796,9 @@ export function ReportsModule() {
                   <CardDescription className="max-w-2xl text-sm leading-relaxed">
                     <strong className="text-foreground">Credit</strong> is cash collected: every{' '}
                     <strong>payment</strong> dated in the month (bills not cancelled).{' '}
-                    <strong className="text-foreground">Debit</strong> is cash paid out:{' '}
-                    <strong>salary</strong> payouts dated in the month. Net position = credit − debit.{' '}
+                    <strong className="text-foreground">Debit</strong> is all cash out:{' '}
+                    <strong>staff payroll</strong> (Staff module) plus <strong>operating expenses</strong> (Expenses
+                    page), both by paid date. Net position = credit − total debit.{' '}
                     <strong>Net billed</strong> matches the Period report (closed bills). Collections can differ when
                     payments fall in a different month than the bill was closed.
                   </CardDescription>
@@ -831,14 +859,15 @@ export function ReportsModule() {
                           </div>
                           <div className="min-w-0 flex-1">
                             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-orange-900/85">
-                              Debit — salary paid
+                              Debit — cash out
                             </p>
                             <p className="mt-1 font-mono text-2xl font-bold tabular-nums text-orange-950">
                               Rs. {formatInr(dcReport.debit_total)}
                             </p>
-                            <p className="mt-1 text-xs text-orange-900/75">
-                              {dcReport.debit_payment_count} payout
-                              {dcReport.debit_payment_count === 1 ? '' : 's'} · from staff payroll
+                            <p className="mt-1 text-xs text-orange-900/75 leading-snug">
+                              Payroll Rs. {formatInr(dcReport.salary_debit_total)} ({dcReport.salary_payout_count}) ·
+                              Expenses Rs. {formatInr(dcReport.expense_debit_total)} ({dcReport.expense_entry_count}) ·{' '}
+                              {dcReport.debit_payment_count} line{dcReport.debit_payment_count === 1 ? '' : 's'} total
                             </p>
                           </div>
                         </div>
@@ -925,9 +954,10 @@ export function ReportsModule() {
                             {dcReport.range_start} → {dcReport.range_end}
                           </p>
                           <p className="mt-3 text-xs">
-                            Figures are computed from the same SQLite tables as the dashboard:{' '}
-                            <code className="rounded bg-muted px-1 py-0.5 text-[11px]">payments</code> and{' '}
-                            <code className="rounded bg-muted px-1 py-0.5 text-[11px]">salary_payments</code>, with bill
+                            Figures use the same data as the dashboard:{' '}
+                            <code className="rounded bg-muted px-1 py-0.5 text-[11px]">payments</code>,{' '}
+                            <code className="rounded bg-muted px-1 py-0.5 text-[11px]">salary_payments</code>, and{' '}
+                            <code className="rounded bg-muted px-1 py-0.5 text-[11px]">expenses</code>, with bill
                             cancellation rules applied to credits.
                           </p>
                         </div>
@@ -980,7 +1010,7 @@ export function ReportsModule() {
                     </div>
 
                     <div className="space-y-3">
-                      <h4 className="text-sm font-semibold text-foreground">Debit — salary payouts</h4>
+                      <h4 className="text-sm font-semibold text-foreground">Debit — staff payroll</h4>
                       <div className="overflow-hidden rounded-xl border border-border">
                         <div className="max-h-[min(22rem,45vh)] overflow-auto">
                           <table className="w-full text-sm">
@@ -1017,6 +1047,51 @@ export function ReportsModule() {
                                 <tr>
                                   <td colSpan={5} className="px-3 py-10 text-center text-muted-foreground">
                                     No salary payouts recorded in this month.
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <h4 className="text-sm font-semibold text-foreground">Debit — operating expenses</h4>
+                      <div className="overflow-hidden rounded-xl border border-border">
+                        <div className="max-h-[min(22rem,45vh)] overflow-auto">
+                          <table className="w-full text-sm">
+                            <thead className="sticky top-0 z-10 bg-muted/90 backdrop-blur-sm">
+                              <tr>
+                                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Category</th>
+                                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Description</th>
+                                <th className="px-3 py-2.5 text-right font-medium text-muted-foreground">Amount</th>
+                                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Method</th>
+                                <th className="hidden px-3 py-2.5 text-left font-medium text-muted-foreground lg:table-cell">
+                                  Paid at
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {dcReport.expense_lines.map((r) => (
+                                <tr key={r.id} className="border-t border-border/70 hover:bg-muted/30">
+                                  <td className="px-3 py-2 text-xs">{r.category_label}</td>
+                                  <td className="px-3 py-2 max-w-[180px] truncate" title={r.title}>
+                                    {r.title}
+                                  </td>
+                                  <td className="px-3 py-2 text-right tabular-nums text-orange-900">
+                                    Rs. {formatInr(r.amount)}
+                                  </td>
+                                  <td className="px-3 py-2 capitalize">{r.payment_method}</td>
+                                  <td className="hidden whitespace-nowrap px-3 py-2 text-xs text-muted-foreground lg:table-cell">
+                                    {r.paid_at ? new Date(r.paid_at).toLocaleString() : '—'}
+                                  </td>
+                                </tr>
+                              ))}
+                              {dcReport.expense_lines.length === 0 && (
+                                <tr>
+                                  <td colSpan={5} className="px-3 py-10 text-center text-muted-foreground">
+                                    No operating expenses in this month (add them under Expenses).
                                   </td>
                                 </tr>
                               )}

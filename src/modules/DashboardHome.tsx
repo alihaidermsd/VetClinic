@@ -130,19 +130,28 @@ export function DashboardHome({ stats, onRefresh }: DashboardHomeProps) {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <Card className="border-l-4 border-l-rose-200">
           <CardContent className="p-5">
             <p className="text-sm text-slate-500">Salary paid today</p>
             <p className="text-xl font-bold text-rose-600 tabular-nums">
               Rs. {Number(stats?.today_salary_paid ?? 0).toLocaleString()}
             </p>
-            <p className="text-xs text-slate-400 mt-1">Deducted for net figures</p>
+            <p className="text-xs text-slate-400 mt-1">Staff payroll</p>
+          </CardContent>
+        </Card>
+        <Card className="border-l-4 border-l-amber-200">
+          <CardContent className="p-5">
+            <p className="text-sm text-slate-500">Other expenses today</p>
+            <p className="text-xl font-bold text-amber-800 tabular-nums">
+              Rs. {Number(stats?.today_expenses_paid ?? 0).toLocaleString()}
+            </p>
+            <p className="text-xs text-slate-400 mt-1">Rent, fuel, etc.</p>
           </CardContent>
         </Card>
         <Card className="border-l-4 border-l-emerald-200">
           <CardContent className="p-5">
-            <p className="text-sm text-slate-500">Net today (after salary)</p>
+            <p className="text-sm text-slate-500">Net today</p>
             <p
               className={`text-xl font-bold tabular-nums ${
                 Number(stats?.today_net_income ?? 0) >= 0 ? 'text-emerald-700' : 'text-red-600'
@@ -150,15 +159,25 @@ export function DashboardHome({ stats, onRefresh }: DashboardHomeProps) {
             >
               Rs. {Number(stats?.today_net_income ?? 0).toLocaleString()}
             </p>
+            <p className="text-xs text-slate-400 mt-1">After payroll &amp; expenses</p>
           </CardContent>
         </Card>
-        <Card className="border-l-4 border-l-violet-200">
+        <Card className="border-l-4 border-l-violet-200 sm:col-span-2 lg:col-span-1">
           <CardContent className="p-5">
             <p className="text-sm text-slate-500">Staff salary (this month)</p>
             <p className="text-xl font-bold text-violet-800 tabular-nums">
               Rs. {Number(stats?.month_salary_paid ?? 0).toLocaleString()}
             </p>
             <p className="text-xs text-slate-400 mt-1">By payment date</p>
+          </CardContent>
+        </Card>
+        <Card className="border-l-4 border-l-orange-200 sm:col-span-2 lg:col-span-2">
+          <CardContent className="p-5">
+            <p className="text-sm text-slate-500">Operating expenses (this month)</p>
+            <p className="text-xl font-bold text-orange-900 tabular-nums">
+              Rs. {Number(stats?.month_expenses_paid ?? 0).toLocaleString()}
+            </p>
+            <p className="text-xs text-slate-400 mt-1">Expenses page · by paid date</p>
           </CardContent>
         </Card>
       </div>

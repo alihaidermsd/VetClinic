@@ -53,8 +53,10 @@ export type RoleDashboardPayload =
       active_rooms: number;
       today_revenue_gross: number;
       today_salary_paid: number;
+      today_expenses_paid: number;
       today_net_income: number;
       month_salary_paid: number;
+      month_expenses_paid: number;
       selfHr: HrSnapshot;
     };
 
@@ -255,8 +257,10 @@ function adminPayload(userId: number): RoleDashboardPayload {
     active_rooms: rooms.length,
     today_revenue_gross: Number(stats.today_revenue) || 0,
     today_salary_paid: Number(stats.today_salary_paid) || 0,
+    today_expenses_paid: Number(stats.today_expenses_paid) || 0,
     today_net_income: Number(stats.today_net_income) || 0,
     month_salary_paid: Number(stats.month_salary_paid) || 0,
+    month_expenses_paid: Number(stats.month_expenses_paid) || 0,
     selfHr: getStaffHrSnapshot(userId),
   };
 }

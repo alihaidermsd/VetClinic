@@ -39,6 +39,12 @@ export async function initDatabase(): Promise<any> {
       if (lastIds.salary_payments == null) {
         lastIds.salary_payments = 0;
       }
+      if (!db.expenses) {
+        db.expenses = {};
+      }
+      if (lastIds.expenses == null) {
+        lastIds.expenses = 0;
+      }
       for (const uid of Object.keys(db.users || {})) {
         const u = db.users[Number(uid)];
         if (u && (u.monthly_salary == null || u.monthly_salary === '')) {
@@ -85,7 +91,7 @@ function createTables() {
   const tables = [
     'users', 'rooms', 'patients', 'animals', 'tokens', 'bills',
     'bill_items', 'inventory', 'medical_records', 'payments', 'audit_logs', 'app_settings',
-    'token_referrals', 'staff_attendance', 'salary_payments',
+    'token_referrals', 'staff_attendance', 'salary_payments', 'expenses',
   ];
   
   tables.forEach(table => {
