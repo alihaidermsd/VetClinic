@@ -1,5 +1,5 @@
 import { getOne, run, listTable } from '../database';
-import type { Token, TokenStatus, RoomQueueItem, TokenReferral } from '@/types';
+import type { Token, TokenStatus, RoomQueueItem, TokenReferral, TokenEntryKind } from '@/types';
 
 /** Calendar day in the clinic's browser timezone (YYYY-MM-DD). */
 export function getClinicDateString(): string {
@@ -88,10 +88,17 @@ function getUTCDateStringFromDate(d: Date): string {
 
 // Generate next token number for today
 export function generateTokenNumber(): number {
-  const nums = (listTable('tokens') as Token[])
-    .filter((t) => isTokenFromToday(t))
-    .map((t) => Number(t.token_number) || 0);
-  return (nums.length ? Math.max(...nums) : 0) + 1;
+  // Reuse gaps created by cancelled tokens so sequence stays compact.
+  // Example: 1..5 active, 6 cancelled => next auto token is 6.
+  const used = new Set(
+    (listTable('tokens') as Token[])
+      .filter((t) => isTokenFromToday(t) && t.status !== 'cancelled')
+      .map((t) => Number(t.token_number))
+      .filter((n) => Number.isFinite(n) && n > 0)
+  );
+  let next = 1;
+  while (used.has(next)) next++;
+  return next;
 }
 
 // Generate bill code
@@ -106,9 +113,51 @@ export function generateBillCode(): string {
   return `BILL-${dateStr}-${String(nextId).padStart(4, '0')}`;
 }
 
+export type CreateTokenOptions = {
+  /** Optional manual token number from reception. */
+  tokenNumber?: number;
+  /**
+   * `direct` = patient goes straight to lab / X-ray / surgery / pharmacy (no doctor queue).
+   * `doctor_first` = normal flow; patient is seen by the doctor first (referrals optional later).
+   */
+  entryKind?: TokenEntryKind;
+  /** Required when `entryKind` is `direct`: that department’s room id (first active room of that type). */
+  directRoomId?: number;
+};
+
+/** True when this visit skipped the doctor queue at reception (walk-in to a department). */
+export function isDirectEntryToken(token: Token | { entry_kind?: TokenEntryKind | string } | null | undefined): boolean {
+  return String(token?.entry_kind ?? '').toLowerCase() === 'direct';
+}
+
 // Create new token
-export function createToken(patientId: number, animalId: number): Token {
-  const tokenNumber = generateTokenNumber();
+export function createToken(patientId: number, animalId: number, options?: CreateTokenOptions): Token {
+  if (options?.entryKind === 'direct') {
+    const rid = Number(options.directRoomId);
+    if (!Number.isFinite(rid) || rid < 1) {
+      throw new Error('Direct visit requires a valid department room.');
+    }
+  }
+
+  const entryKind: TokenEntryKind = options?.entryKind === 'direct' ? 'direct' : 'doctor_first';
+
+  const manual = options?.tokenNumber;
+  let tokenNumber = generateTokenNumber();
+  if (manual != null) {
+    const n = Number(manual);
+    if (!Number.isFinite(n) || n < 1 || !Number.isInteger(n)) {
+      throw new Error('Enter a valid token number');
+    }
+    tokenNumber = n;
+  }
+
+  const sameNumberToday = (listTable('tokens') as Token[]).find(
+    (t) => isTokenFromToday(t) && Number(t.token_number) === Number(tokenNumber)
+  );
+  if (sameNumberToday && sameNumberToday.status !== 'completed' && sameNumberToday.status !== 'cancelled') {
+    throw new Error(`Token #${tokenNumber} is already taken today. Complete old patient first.`);
+  }
+
   const billCode = generateBillCode();
   const ts = new Date().toISOString();
   const today = getCurrentDate();
@@ -119,7 +168,7 @@ export function createToken(patientId: number, animalId: number): Token {
     [tokenNumber, 0, patientId, animalId, 'waiting', today, ts]
   );
 
-  const tokenId = tokenResult.lastInsertRowid;
+  const tokenId = tokenResult.lastInsertRowid as number;
 
   const billResult = run(
     'INSERT INTO bills (bill_code, patient_id, animal_id, token_id, total_amount, discount_amount, discount_percent, final_amount, paid_amount, payment_status, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -128,6 +177,12 @@ export function createToken(patientId: number, animalId: number): Token {
   
   // Update token with bill_id
   run('UPDATE tokens SET bill_id = ? WHERE id = ?', [billResult.lastInsertRowid, tokenId]);
+
+  run('UPDATE tokens SET entry_kind = ? WHERE id = ?', [entryKind, tokenId]);
+
+  if (entryKind === 'direct' && options?.directRoomId) {
+    assignTokenToRoom(tokenId, Number(options.directRoomId));
+  }
   
   return getTokenById(tokenId) as Token;
 }
@@ -171,18 +226,24 @@ export function getTodayTokensForDashboard(): TodayTokenDashboardRow[] {
   }));
 }
 
-export type ReceptionTokenRow = TodayTokenDashboardRow & { bill_code: string };
+export type ReceptionTokenRow = TodayTokenDashboardRow & { bill_code: string; entry_kind?: TokenEntryKind };
 
 /** Today's tokens with names and bill code — for reception list and printing. */
 export function getTodayTokensForReception(): ReceptionTokenRow[] {
-  const base = getTodayTokensForDashboard();
+  const base = getTodayTokensForDashboard().filter((t) => t.status !== 'cancelled');
   const billsById = Object.fromEntries(
     listTable('bills').map((b: { id: number; bill_code: string }) => [b.id, b])
   );
   return base.map((t) => ({
     ...t,
     bill_code: billsById[t.bill_id]?.bill_code ?? '—',
+    entry_kind: t.entry_kind,
   }));
+}
+
+/** Doctor sidebar: patients who should see the doctor first (excludes walk-in direct department tokens). */
+export function getTodayTokensForDoctorQueue(): TodayTokenDashboardRow[] {
+  return getTodayTokensForDashboard().filter((t) => !isDirectEntryToken(t));
 }
 
 // Update token status
@@ -455,6 +516,37 @@ export function getWaitingTokensByRoomType(roomType: string): RoomQueueItem[] {
   }
 
   return matched
+    .sort((a, b) => a.token_number - b.token_number)
+    .map((t) => ({
+      token_id: t.id,
+      token_number: t.token_number,
+      bill_id: t.bill_id,
+      patient_name: patients[t.patient_id]?.owner_name ?? '—',
+      owner_phone: patients[t.patient_id]?.owner_phone ?? '—',
+      animal_name: animals[t.animal_id]?.name ?? '—',
+      animal_type: String(animals[t.animal_id]?.type ?? ''),
+      status: t.status,
+      waiting_since: t.created_at,
+    }));
+}
+
+/** Every token still active today (waiting or in progress) — full-clinic list for room screens. */
+export function getTodayActiveQueueItems(): RoomQueueItem[] {
+  const patients = Object.fromEntries(
+    listTable('patients').map((p: { id: number; owner_name?: string; owner_phone?: string }) => [
+      p.id,
+      p,
+    ])
+  );
+  const animals = Object.fromEntries(
+    listTable('animals').map((a: { id: number; name?: string; type?: string }) => [a.id, a])
+  );
+
+  return (listTable('tokens') as Token[])
+    .filter(
+      (t) =>
+        isTokenFromToday(t) && (t.status === 'waiting' || t.status === 'in_progress')
+    )
     .sort((a, b) => a.token_number - b.token_number)
     .map((t) => ({
       token_id: t.id,

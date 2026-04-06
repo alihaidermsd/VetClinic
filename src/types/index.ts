@@ -124,6 +124,9 @@ export type AnimalType =
   | 'other';
 
 // Token Types
+/** Reception: see doctor first vs walk-in straight to a department (no referral). */
+export type TokenEntryKind = 'doctor_first' | 'direct';
+
 export interface Token {
   id: number;
   token_number: number;
@@ -131,6 +134,8 @@ export interface Token {
   patient_id: number;
   animal_id: number;
   room_id?: number;
+  /** Set on new tokens; legacy rows may omit (treated like doctor_first). */
+  entry_kind?: TokenEntryKind;
   status: TokenStatus;
   date: string;
   created_at: string;

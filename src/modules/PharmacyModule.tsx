@@ -12,10 +12,13 @@ import {
   ShoppingCart, 
   Minus,
   Trash2,
+  Pencil,
+  Save,
   Package,
   Percent,
   ListOrdered,
   RefreshCw,
+  X,
 } from 'lucide-react';
 import { getPharmacyItems, searchInventory, getInventoryItemById } from '@/lib/services/inventoryService';
 import {
@@ -24,6 +27,8 @@ import {
   getBillWithDetails,
   addBillItem,
   applyDiscount,
+  updateBillItem,
+  removeBillItem,
 } from '@/lib/services/billingService';
 import { getRoomsByType } from '@/lib/services/roomService';
 import {
@@ -63,6 +68,10 @@ export function PharmacyModule() {
   const [pharmacyItems, setPharmacyItems] = useState<any[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [discountPercent, setDiscountPercent] = useState('');
+  const [editingItemId, setEditingItemId] = useState<number | null>(null);
+  const [editItemName, setEditItemName] = useState('');
+  const [editItemQty, setEditItemQty] = useState('');
+  const [editItemPrice, setEditItemPrice] = useState('');
   const [referralQueue, setReferralQueue] = useState<RoomQueueItem[]>([]);
 
   const refreshReferralQueue = () => {
@@ -93,6 +102,114 @@ export function PharmacyModule() {
     const billStatus = String(b?.status ?? '').trim().toLowerCase();
     const payStatus = String(b?.payment_status ?? '').trim().toLowerCase();
     return billStatus !== 'completed' && billStatus !== 'cancelled' && payStatus !== 'paid';
+  };
+
+  const visitLocked =
+    !currentBill?.bill ||
+    !isBillPendingForPharmacy(currentBill?.bill) ||
+    currentBill?.token?.status === 'completed' ||
+    currentBill?.token?.status === 'cancelled';
+
+  const canModifyBillItem = (item: any): boolean => {
+    if (!user) return false;
+    if (visitLocked) return false;
+    if (user.role === 'admin') return true;
+    const sameId = Number(item?.operator_id) === Number(user.id);
+    const sameName =
+      String(item?.operator_name ?? '').trim().toLowerCase() ===
+      String(user?.name ?? '').trim().toLowerCase();
+    return sameId || sameName;
+  };
+
+  const cancelEditItem = () => {
+    setEditingItemId(null);
+    setEditItemName('');
+    setEditItemQty('');
+    setEditItemPrice('');
+  };
+
+  const startEditItem = (item: any) => {
+    const itemId = Number(item?.id);
+    if (!Number.isFinite(itemId)) return;
+
+    setEditingItemId(itemId);
+    setEditItemName(String(item?.item_name ?? ''));
+    setEditItemQty(String(Number(item?.quantity ?? 1) || 1));
+
+    const unit = item?.unit_price != null ? Number(item.unit_price) : 0;
+    setEditItemPrice(String(Number(unit) || 0));
+  };
+
+  const handleSaveItemEdit = (itemId: number) => {
+    if (!currentBill?.bill?.id) return;
+    const item = currentBill?.items?.find((i: any) => Number(i?.id) === Number(itemId));
+    if (!item) {
+      toast.error('Line item not found');
+      return;
+    }
+    if (!canModifyBillItem(item)) {
+      toast.error('You can edit only the lines you created');
+      return;
+    }
+    if (visitLocked) return;
+
+    const name = editItemName.trim();
+    const qty = parseInt(editItemQty, 10);
+    const unitPrice = parseFloat(String(editItemPrice).replace(/,/g, ''));
+
+    if (!name) {
+      toast.error('Item name is required');
+      return;
+    }
+    if (!Number.isFinite(qty) || qty < 1) {
+      toast.error('Quantity must be at least 1');
+      return;
+    }
+    if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+      toast.error('Unit price must be greater than 0');
+      return;
+    }
+
+    try {
+      updateBillItem(itemId, { item_name: name, quantity: qty, unit_price: unitPrice });
+      const updatedBill = getBillWithDetails(currentBill.bill.id);
+      if (updatedBill) setCurrentBill(updatedBill);
+      cancelEditItem();
+      toast.success('Line item updated');
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to update line item');
+    }
+  };
+
+  const handleDeleteItem = (itemId: number) => {
+    if (!currentBill?.bill?.id) return;
+    const item = currentBill?.items?.find((i: any) => Number(i?.id) === Number(itemId));
+    if (!item) {
+      toast.error('Line item not found');
+      return;
+    }
+    if (!canModifyBillItem(item)) {
+      toast.error('You can delete only the lines you created');
+      return;
+    }
+    if (visitLocked) return;
+
+    const ok = window.confirm('Delete this line item?');
+    if (!ok) return;
+
+    try {
+      const removed = removeBillItem(itemId);
+      if (!removed) {
+        toast.error('Failed to delete line item');
+        return;
+      }
+      if (editingItemId === itemId) cancelEditItem();
+      const updatedBill = getBillWithDetails(currentBill.bill.id);
+      if (updatedBill) setCurrentBill(updatedBill);
+      toast.success('Line item deleted');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to delete line item');
+    }
   };
 
   const loadDispenseBills = () => {
@@ -144,8 +261,15 @@ export function PharmacyModule() {
       return;
     }
     const tid = currentBill.token.id;
-    if (!hasPendingReferralToRoom(tid, pharmacyRoom.id)) {
-      toast.error('No active pharmacy referral for this visit');
+    const tok = getTokenById(tid);
+    if (!tok) {
+      toast.error('Token no longer available');
+      return;
+    }
+    const atPharmacy = Number(tok.room_id) === Number(pharmacyRoom.id);
+    const hasPharmacyRef = hasPendingReferralToRoom(tid, pharmacyRoom.id);
+    if (!hasPharmacyRef && !atPharmacy) {
+      toast.error('No active pharmacy step for this visit — open a patient from the queue on the left.');
       return;
     }
     const result = completeOperatorRoomVisit(tid, pharmacyRoom.id);
@@ -330,7 +454,13 @@ export function PharmacyModule() {
   const showCompletePharmacyStep =
     currentBill?.token?.id != null &&
     pharmacyRoom != null &&
-    hasPendingReferralToRoom(currentBill.token.id, pharmacyRoom.id);
+    (() => {
+      const tid = currentBill.token.id;
+      const tok = getTokenById(tid);
+      if (!tok) return false;
+      const atPharmacy = Number(tok.room_id) === Number(pharmacyRoom.id);
+      return hasPendingReferralToRoom(tid, pharmacyRoom.id) || atPharmacy;
+    })();
 
   return (
     <div className="space-y-6">
@@ -417,7 +547,7 @@ export function PharmacyModule() {
                 <div className="flex items-center justify-between gap-2">
                   <CardTitle className="flex items-center gap-2 text-base">
                     <ListOrdered className="w-5 h-5 text-violet-700" />
-                    Doctor referrals (today)
+                    Pharmacy queue (today)
                   </CardTitle>
                   <Button
                     type="button"
@@ -431,13 +561,13 @@ export function PharmacyModule() {
                   </Button>
                 </div>
                 <p className="text-sm text-slate-600">
-                  Patients sent here from the doctor. Click a row to load their bill.
+                  Doctor referrals and direct walk-ins from reception. Click a row to load their bill.
                 </p>
               </CardHeader>
               <CardContent>
                 <div className="max-h-48 overflow-y-auto space-y-1 pr-1 -mr-1">
                   {referralQueue.length === 0 ? (
-                    <p className="text-sm text-slate-500 py-4 text-center">No referred patients in queue.</p>
+                    <p className="text-sm text-slate-500 py-4 text-center">No patients in pharmacy queue.</p>
                   ) : (
                     referralQueue.map((row) => (
                       <button
@@ -702,15 +832,121 @@ export function PharmacyModule() {
                           </thead>
                           <tbody>
                             {currentBill.items?.length ? (
-                              currentBill.items.map((item: any) => (
-                                <tr key={item.id} className="border-b border-slate-100">
-                                  <td className="py-2">{item.item_name}</td>
-                                  <td className="py-2 text-slate-500">{billItemProviderLabel(item)}</td>
-                                  <td className="py-2 text-right">{item.quantity}</td>
-                                  <td className="py-2 text-right">Rs. {formatRupee(item.unit_price)}</td>
-                                  <td className="py-2 text-right">Rs. {formatRupee(item.total_price)}</td>
-                                </tr>
-                              ))
+                              currentBill.items.map((item: any) => {
+                                const itemId = Number(item?.id);
+                                const isEditing = editingItemId === itemId;
+                                const canEdit = canModifyBillItem(item);
+
+                                const qtyNum = isEditing ? parseInt(editItemQty, 10) : Number(item?.quantity);
+                                const unitNum = isEditing
+                                  ? parseFloat(String(editItemPrice).replace(/,/g, ''))
+                                  : Number(item?.unit_price);
+                                const totalNum = Number.isFinite(qtyNum) && Number.isFinite(unitNum) ? qtyNum * unitNum : 0;
+
+                                return (
+                                  <tr key={item.id} className="border-b border-slate-100">
+                                    <td className="py-2">
+                                      {isEditing ? (
+                                        <Input
+                                          value={editItemName}
+                                          onChange={(e) => setEditItemName(e.target.value)}
+                                          disabled={visitLocked}
+                                          className="h-8 w-56"
+                                        />
+                                      ) : (
+                                        item.item_name
+                                      )}
+                                    </td>
+                                    <td className="py-2 text-slate-500">{billItemProviderLabel(item)}</td>
+                                    <td className="py-2 text-right">
+                                      {isEditing ? (
+                                        <Input
+                                          type="number"
+                                          min={1}
+                                          value={editItemQty}
+                                          onChange={(e) => setEditItemQty(e.target.value)}
+                                          disabled={visitLocked}
+                                          className="h-8 w-20 ml-auto"
+                                        />
+                                      ) : (
+                                        item.quantity
+                                      )}
+                                    </td>
+                                    <td className="py-2 text-right">
+                                      {isEditing ? (
+                                        <Input
+                                          type="number"
+                                          min={0}
+                                          step={0.01}
+                                          value={editItemPrice}
+                                          onChange={(e) => setEditItemPrice(e.target.value)}
+                                          disabled={visitLocked}
+                                          className="h-8 w-28"
+                                        />
+                                      ) : (
+                                        `Rs. ${formatRupee(item.unit_price)}`
+                                      )}
+                                    </td>
+                                    <td className="py-2 text-right">
+                                      {isEditing ? (
+                                        <div className="flex flex-col items-end gap-1">
+                                          <div className="text-sm text-slate-900">
+                                            Rs. {Number(totalNum).toLocaleString('en-IN')}
+                                          </div>
+                                          <div className="flex items-center gap-1 pt-1">
+                                            <Button
+                                              type="button"
+                                              size="icon"
+                                              variant="outline"
+                                              className="h-8 w-8"
+                                              onClick={() => handleSaveItemEdit(itemId)}
+                                              disabled={visitLocked}
+                                            >
+                                              <Save className="w-4 h-4" />
+                                            </Button>
+                                            <Button
+                                              type="button"
+                                              size="icon"
+                                              variant="ghost"
+                                              className="h-8 w-8"
+                                              onClick={cancelEditItem}
+                                              disabled={visitLocked}
+                                            >
+                                              <X className="w-4 h-4" />
+                                            </Button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div className="flex justify-end items-center gap-2">
+                                          <span>Rs. {formatRupee(item.total_price)}</span>
+                                          {canEdit && (
+                                            <>
+                                              <Button
+                                                type="button"
+                                                size="icon"
+                                                variant="outline"
+                                                className="h-8 w-8"
+                                                onClick={() => startEditItem(item)}
+                                              >
+                                                <Pencil className="w-4 h-4" />
+                                              </Button>
+                                              <Button
+                                                type="button"
+                                                size="icon"
+                                                variant="ghost"
+                                                className="h-8 w-8 text-red-500 hover:text-red-600"
+                                                onClick={() => handleDeleteItem(itemId)}
+                                              >
+                                                <Trash2 className="w-4 h-4" />
+                                              </Button>
+                                            </>
+                                          )}
+                                        </div>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })
                             ) : (
                               <tr>
                                 <td

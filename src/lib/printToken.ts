@@ -1,13 +1,12 @@
-import { brandLogoUrl } from '@/lib/brandLogoUrl';
-
 /** Opens a small window and prints a queue token slip for the customer. Returns false if pop-up was blocked. */
 export function printTokenSlip(opts: {
   tokenNumber: number;
   customerName: string;
   petName: string;
   billCode: string;
+  /** e.g. "Direct — Laboratory" when reception sends patient straight to a department */
+  visitNote?: string;
 }): boolean {
-  const logoUrl = brandLogoUrl();
   const now = new Date();
   const dateStr = now.toLocaleDateString(undefined, {
     weekday: 'long',
@@ -52,9 +51,12 @@ export function printTokenSlip(opts: {
   </style>
 </head>
 <body>
-  <div class="logo-wrap"><img src="${escapeHtml(logoUrl)}" alt="Animal Care Hospital" /></div>
   <div class="brand">Animal Care Hospital</div>
-  <div class="sub">Queue token — please wait for your number</div>
+  <div class="sub">${
+    opts.visitNote
+      ? `${escapeHtml(opts.visitNote)}<br/><span style="opacity:.9">Please wait to be called at that counter.</span>`
+      : 'Queue token — please wait for your number'
+  }</div>
   <div class="token-box">
     <div class="token-label">Your token</div>
     <div class="token-num">#${opts.tokenNumber}</div>

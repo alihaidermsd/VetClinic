@@ -21,6 +21,9 @@ import {
   FlaskConical,
   Scan,
   Scissors,
+  Pencil,
+  Trash2,
+  Save,
 } from 'lucide-react';
 import {
   getTokenByNumber,
@@ -28,10 +31,18 @@ import {
   referPatientToRooms,
   startToken,
   completeToken,
-  getTodayTokensForDashboard,
+  getTodayTokensForDoctorQueue,
   getTokenById,
 } from '@/lib/services/tokenService';
-import { getBillWithDetails, addBillItem, applyDiscount } from '@/lib/services/billingService';
+import {
+  getBillWithDetails,
+  addBillItem,
+  applyDiscount,
+  getQuickChargePresets,
+  updateBillItem,
+  removeBillItem,
+} from '@/lib/services/billingService';
+import { QuickChargeSection } from '@/components/billing/QuickChargeSection';
 import {
   getMedicalRecordsByBillId,
   parseImageJsonArray,
@@ -74,7 +85,7 @@ export function DoctorModule() {
   const [tokenNumber, setTokenNumber] = useState('');
   const [currentToken, setCurrentToken] = useState<any>(null);
   const [currentBill, setCurrentBill] = useState<any>(null);
-  const [tokenQueue, setTokenQueue] = useState<ReturnType<typeof getTodayTokensForDashboard>>([]);
+  const [tokenQueue, setTokenQueue] = useState<ReturnType<typeof getTodayTokensForDoctorQueue>>([]);
   const [rooms, setRooms] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState('examination');
 
@@ -92,11 +103,11 @@ export function DoctorModule() {
   const [surgeryNotes, setSurgeryNotes] = useState('');
   const [surgeryExamination, setSurgeryExamination] = useState('');
 
-  // Billing form
-  const [customItemName, setCustomItemName] = useState('');
-  const [customItemPrice, setCustomItemPrice] = useState('');
-  const [itemQuantity, setItemQuantity] = useState('1');
   const [billDiscountPercent, setBillDiscountPercent] = useState('');
+  const [editingItemId, setEditingItemId] = useState<number | null>(null);
+  const [editItemName, setEditItemName] = useState('');
+  const [editItemQty, setEditItemQty] = useState('');
+  const [editItemPrice, setEditItemPrice] = useState('');
   const [referralTargets, setReferralTargets] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
@@ -109,7 +120,7 @@ export function DoctorModule() {
 
   const refreshTokenQueue = () => {
     try {
-      setTokenQueue(getTodayTokensForDashboard());
+      setTokenQueue(getTodayTokensForDoctorQueue());
     } catch (e) {
       console.error(e);
     }
@@ -120,13 +131,6 @@ export function DoctorModule() {
     const t = setInterval(refreshTokenQueue, 15000);
     return () => clearInterval(t);
   }, []);
-
-  useEffect(() => {
-    if (!currentToken?.token?.id) return;
-    setCustomItemName('');
-    setCustomItemPrice('');
-    setItemQuantity('1');
-  }, [currentToken?.token?.id]);
 
   useEffect(() => {
     const b = currentBill?.bill;
@@ -186,7 +190,7 @@ export function DoctorModule() {
       setSurgeryNotes('');
       setSurgeryExamination('');
     }
-    setActiveTab('examination');
+    setActiveTab('billing');
   }, [currentToken?.token?.id, currentBill?.bill?.id]);
 
   const loadRooms = () => {
@@ -288,39 +292,147 @@ export function DoctorModule() {
   const visitLocked =
     currentToken?.token?.status === 'completed' || currentToken?.token?.status === 'cancelled';
 
-  const handleAddCharge = () => {
+  const canModifyBillItem = (item: any): boolean => {
+    if (!user) return false;
+    if (visitLocked) return false;
+    if (user.role === 'admin') return true;
+    const sameId = Number(item?.operator_id) === Number(user.id);
+    const sameName =
+      String(item?.operator_name ?? '').trim().toLowerCase() ===
+      String(user?.name ?? '').trim().toLowerCase();
+    return sameId || sameName;
+  };
+
+  const cancelEditItem = () => {
+    setEditingItemId(null);
+    setEditItemName('');
+    setEditItemQty('');
+    setEditItemPrice('');
+  };
+
+  const startEditItem = (item: any) => {
+    const itemId = Number(item?.id);
+    if (!Number.isFinite(itemId)) return;
+
+    const unit =
+      item?.unit_price != null
+        ? Number(item.unit_price)
+        : Number(item?.quantity) > 0
+          ? Number(item?.total_price) / Number(item?.quantity)
+          : 0;
+
+    setEditingItemId(itemId);
+    setEditItemName(String(item?.item_name ?? ''));
+    setEditItemQty(String(Number(item?.quantity ?? 1) || 1));
+    setEditItemPrice(String(Number(unit) || 0));
+  };
+
+  const handleSaveItemEdit = (itemId: number) => {
+    if (!currentBill?.bill?.id) return;
+    const item = currentBill?.items?.find((i: any) => Number(i?.id) === Number(itemId));
+    if (!item) {
+      toast.error('Line item not found');
+      return;
+    }
+    if (!canModifyBillItem(item)) {
+      toast.error('You can edit only the lines you created');
+      return;
+    }
+    if (visitLocked) return;
+
+    const name = editItemName.trim();
+    const qty = parseInt(editItemQty, 10);
+    const unitPrice = parseFloat(String(editItemPrice).replace(/,/g, ''));
+
+    if (!name) {
+      toast.error('Item name is required');
+      return;
+    }
+    if (!Number.isFinite(qty) || qty < 1) {
+      toast.error('Quantity must be at least 1');
+      return;
+    }
+    if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+      toast.error('Unit price must be greater than 0');
+      return;
+    }
+
+    try {
+      updateBillItem(itemId, { item_name: name, quantity: qty, unit_price: unitPrice });
+      const refreshed = getBillWithDetails(currentBill.bill.id);
+      if (refreshed) setCurrentBill(refreshed);
+      cancelEditItem();
+      toast.success('Line item updated');
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to update line item');
+    }
+  };
+
+  const handleDeleteItem = (itemId: number) => {
+    if (!currentBill?.bill?.id) return;
+    const item = currentBill?.items?.find((i: any) => Number(i?.id) === Number(itemId));
+    if (!item) {
+      toast.error('Line item not found');
+      return;
+    }
+    if (!canModifyBillItem(item)) {
+      toast.error('You can delete only the lines you created');
+      return;
+    }
+    if (visitLocked) return;
+
+    const ok = window.confirm('Delete this line item?');
+    if (!ok) return;
+
+    try {
+      const removed = removeBillItem(itemId);
+      if (!removed) {
+        toast.error('Failed to delete line item');
+        return;
+      }
+
+      if (editingItemId === itemId) cancelEditItem();
+      const refreshed = getBillWithDetails(currentBill.bill.id);
+      if (refreshed) setCurrentBill(refreshed);
+      toast.success('Line item deleted');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to delete line item');
+    }
+  };
+
+  const handleAddBillLine = (itemData: BillItemFormData) => {
     if (!currentToken || !currentBill || !user) return;
     if (visitLocked) {
       toast.error('This visit is completed or cancelled — charges cannot be edited.');
       return;
     }
 
-    if (!customItemName.trim()) {
+    if (!itemData.item_name?.trim()) {
       toast.error('Please enter item name');
       return;
     }
-    const unit = parseFloat(String(customItemPrice).replace(/,/g, ''));
+    const unit = parseFloat(String(itemData.unit_price).replace(/,/g, ''));
     if (!Number.isFinite(unit) || unit <= 0) {
       toast.error('Enter a valid unit price greater than zero');
       return;
     }
-    const qty = parseInt(String(itemQuantity), 10);
+    const qty = parseInt(String(itemData.quantity), 10);
     if (!Number.isFinite(qty) || qty < 1) {
       toast.error('Enter a valid quantity (at least 1)');
       return;
     }
 
-    const itemData: BillItemFormData = {
-      item_name: customItemName.trim(),
-      item_type: 'procedure',
+    const payload: BillItemFormData = {
+      item_name: itemData.item_name.trim(),
+      item_type: itemData.item_type,
       quantity: qty,
       unit_price: unit,
-      notes: '',
+      notes: itemData.notes ?? '',
     };
 
     try {
       const { roomId, roomName } = resolveDoctorBillRoom(rooms, user.room_id);
-      addBillItem(currentBill.bill.id, itemData, roomId, roomName, user.id, user.name);
+      addBillItem(currentBill.bill.id, payload, roomId, roomName, user.id, user.name);
 
       const updatedBill = getBillWithDetails(currentBill.bill.id);
       setCurrentBill(updatedBill);
@@ -329,11 +441,6 @@ export function DoctorModule() {
       }
 
       toast.success('Charge added successfully');
-      
-      // Reset form
-      setCustomItemName('');
-      setCustomItemPrice('');
-      setItemQuantity('1');
     } catch (error: any) {
       toast.error(error?.message || 'Failed to add charge');
       console.error(error);
@@ -635,8 +742,8 @@ export function DoctorModule() {
 
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="examination">Examination</TabsTrigger>
               <TabsTrigger value="billing">Add Charges</TabsTrigger>
+              <TabsTrigger value="examination">Examination</TabsTrigger>
               <TabsTrigger value="referral">Referral</TabsTrigger>
             </TabsList>
 
@@ -869,41 +976,13 @@ export function DoctorModule() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {/* Custom Charge */}
-                  <div className="space-y-2">
-                    <Label>Custom Charge</Label>
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="Item name"
-                        value={customItemName}
-                        onChange={(e) => setCustomItemName(e.target.value)}
-                        className="flex-1"
-                        disabled={visitLocked}
-                      />
-                      <Input
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        placeholder="Price"
-                        value={customItemPrice}
-                        onChange={(e) => setCustomItemPrice(e.target.value)}
-                        className="w-28"
-                        disabled={visitLocked}
-                      />
-                      <Input
-                        type="number"
-                        min={1}
-                        placeholder="Qty"
-                        value={itemQuantity}
-                        onChange={(e) => setItemQuantity(e.target.value)}
-                        className="w-20"
-                        disabled={visitLocked}
-                      />
-                      <Button type="button" onClick={() => handleAddCharge()} disabled={visitLocked}>
-                        Add
-                      </Button>
-                    </div>
-                  </div>
+                  <QuickChargeSection
+                    presets={getQuickChargePresets('doctor')}
+                    resetKey={currentToken?.token?.id ?? null}
+                    visitLocked={visitLocked}
+                    onAddLine={handleAddBillLine}
+                    customItemType="procedure"
+                  />
 
                   <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3 space-y-2">
                     <Label className="flex items-center gap-2 text-slate-800">
@@ -942,7 +1021,7 @@ export function DoctorModule() {
                     <h4 className="font-medium mb-2">Current Bill Items</h4>
                     {(!currentBill?.items || currentBill.items.length === 0) && (
                       <p className="text-sm text-slate-500 py-6 text-center bg-slate-50 rounded-lg border border-dashed border-slate-200">
-                        No line items yet. Add a custom charge above.
+                        No line items yet. Add a standard or custom charge above.
                       </p>
                     )}
                     {currentBill?.items && currentBill.items.length > 0 && (
@@ -956,13 +1035,112 @@ export function DoctorModule() {
                             </tr>
                           </thead>
                           <tbody>
-                            {currentBill.items.map((item: any) => (
-                              <tr key={item.id} className="border-b border-slate-100">
-                                <td className="py-2 text-sm">{item.item_name}</td>
-                                <td className="py-2 text-sm text-right">{item.quantity}</td>
-                                <td className="py-2 text-sm text-right">Rs. {item.total_price}</td>
-                              </tr>
-                            ))}
+                            {currentBill.items.map((item: any) => {
+                              const itemId = Number(item?.id);
+                              const isEditing = editingItemId === itemId;
+                              const canEdit = canModifyBillItem(item);
+
+                              const qtyNum = isEditing ? parseInt(editItemQty, 10) : Number(item?.quantity);
+                              const unitNum = isEditing ? parseFloat(String(editItemPrice).replace(/,/g, '')) : Number(item?.unit_price);
+                              const totalNum = Number.isFinite(qtyNum) && Number.isFinite(unitNum) ? qtyNum * unitNum : 0;
+
+                              return (
+                                <tr key={item.id} className="border-b border-slate-100">
+                                  <td className="py-2 text-sm">
+                                    {isEditing ? (
+                                      <Input
+                                        value={editItemName}
+                                        onChange={(e) => setEditItemName(e.target.value)}
+                                        disabled={visitLocked}
+                                        className="h-8 w-56"
+                                      />
+                                    ) : (
+                                      item.item_name
+                                    )}
+                                  </td>
+                                  <td className="py-2 text-sm text-right">
+                                    {isEditing ? (
+                                      <Input
+                                        type="number"
+                                        min={1}
+                                        value={editItemQty}
+                                        onChange={(e) => setEditItemQty(e.target.value)}
+                                        disabled={visitLocked}
+                                        className="h-8 w-20 ml-auto"
+                                      />
+                                    ) : (
+                                      item.quantity
+                                    )}
+                                  </td>
+                                  <td className="py-2 text-sm text-right">
+                                    {isEditing ? (
+                                      <div className="flex flex-col items-end gap-1">
+                                        <Input
+                                          type="number"
+                                          min={0}
+                                          step={0.01}
+                                          value={editItemPrice}
+                                          onChange={(e) => setEditItemPrice(e.target.value)}
+                                          disabled={visitLocked}
+                                          className="h-8 w-28"
+                                        />
+                                        <div className="text-xs text-slate-600">
+                                          Total: Rs. {Number(totalNum).toLocaleString('en-IN')}
+                                        </div>
+                                        <div className="flex items-center gap-1 pt-1">
+                                          <Button
+                                            type="button"
+                                            size="icon"
+                                            variant="outline"
+                                            className="h-8 w-8"
+                                            onClick={() => handleSaveItemEdit(itemId)}
+                                            disabled={visitLocked}
+                                          >
+                                            <Save className="w-4 h-4" />
+                                          </Button>
+                                          <Button
+                                            type="button"
+                                            size="icon"
+                                            variant="ghost"
+                                            className="h-8 w-8"
+                                            onClick={cancelEditItem}
+                                            disabled={visitLocked}
+                                          >
+                                            <X className="w-4 h-4" />
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="flex justify-end items-center gap-2">
+                                        <span>Rs. {Number(item.total_price).toLocaleString('en-IN')}</span>
+                                        {canEdit && (
+                                          <>
+                                            <Button
+                                              type="button"
+                                              size="icon"
+                                              variant="outline"
+                                              className="h-8 w-8"
+                                              onClick={() => startEditItem(item)}
+                                            >
+                                              <Pencil className="w-4 h-4" />
+                                            </Button>
+                                            <Button
+                                              type="button"
+                                              size="icon"
+                                              variant="ghost"
+                                              className="h-8 w-8 text-red-600 hover:text-red-700"
+                                              onClick={() => handleDeleteItem(itemId)}
+                                            >
+                                              <Trash2 className="w-4 h-4" />
+                                            </Button>
+                                          </>
+                                        )}
+                                      </div>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                           <tfoot>
                             {Number(currentBill.bill.discount_amount) > 0 && (
@@ -1122,6 +1300,10 @@ export function DoctorModule() {
             </Button>
           </CardHeader>
           <CardContent className="pt-0">
+            <p className="text-xs text-slate-500 mb-3">
+              Patients who start at the doctor. Walk-ins sent straight to lab, X-ray, surgery, or pharmacy appear only in
+              those departments.
+            </p>
             {tokenQueue.length === 0 ? (
               <p className="text-sm text-slate-500 py-6 text-center">No tokens for today yet.</p>
             ) : (

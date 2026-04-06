@@ -4,6 +4,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Search,
   Plus,
@@ -15,6 +17,10 @@ import {
   Percent,
   ClipboardList,
   ImagePlus,
+  ArrowRight,
+  Pencil,
+  Trash2,
+  Save,
 } from 'lucide-react';
 import {
   getTokenByNumber,
@@ -22,11 +28,23 @@ import {
   startToken,
   getTokenById,
   getWaitingTokensByRoomType,
+  getTodayActiveQueueItems,
   activateReferralAtRoom,
   hasPendingReferralToRoom,
   completeOperatorRoomVisit,
+  referPatientToRooms,
+  isDirectEntryToken,
+  assignTokenToRoom,
 } from '@/lib/services/tokenService';
-import { getBillWithDetails, addBillItem, applyDiscount } from '@/lib/services/billingService';
+import {
+  getBillWithDetails,
+  addBillItem,
+  applyDiscount,
+  getQuickChargePresets,
+  updateBillItem,
+  removeBillItem,
+} from '@/lib/services/billingService';
+import { QuickChargeSection } from '@/components/billing/QuickChargeSection';
 import {
   getMedicalRecordsByBillId,
   parseImageJsonArray,
@@ -51,6 +69,14 @@ const DEFAULT_ITEM_TYPE: Record<OperatorRoomKind, ItemType> = {
   xray: 'xray',
   surgery: 'surgery',
 };
+
+/** Destinations an operator can send a patient to (same as doctor referrals; excludes current room). */
+const OPERATOR_REFERRAL_ROOMS: { value: RoomType; label: string }[] = [
+  { value: 'lab', label: 'Laboratory' },
+  { value: 'xray', label: 'X-Ray Room' },
+  { value: 'surgery', label: 'Surgery Room' },
+  { value: 'pharmacy', label: 'Pharmacy' },
+];
 
 function resolveOperatorBillRoom(
   rooms: Room[],
@@ -84,14 +110,22 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
   const [currentToken, setCurrentToken] = useState<any>(null);
   const [currentBill, setCurrentBill] = useState<any>(null);
   const [roomQueue, setRoomQueue] = useState<RoomQueueItem[]>([]);
+  const [allActiveQueue, setAllActiveQueue] = useState<RoomQueueItem[]>([]);
+  const [sidebarTab, setSidebarTab] = useState<'queue' | 'all' | 'refer'>('queue');
+  const [referralTargets, setReferralTargets] = useState<Set<string>>(() => new Set());
   const [rooms, setRooms] = useState<Room[]>(() => getAllRooms());
 
-  const [customItemName, setCustomItemName] = useState('');
-  const [customItemPrice, setCustomItemPrice] = useState('');
-  const [itemQuantity, setItemQuantity] = useState('1');
+  const operatorReferralOptions = OPERATOR_REFERRAL_ROOMS.filter((r) => r.value !== roomType);
+
   const [billDiscountPercent, setBillDiscountPercent] = useState('');
   const [operatorNotes, setOperatorNotes] = useState('');
   const [operatorImages, setOperatorImages] = useState<string[]>([]);
+
+  // Bill item CRUD (creator-only): operator can edit/delete their own lines.
+  const [editingItemId, setEditingItemId] = useState<number | null>(null);
+  const [editItemName, setEditItemName] = useState('');
+  const [editItemQty, setEditItemQty] = useState('');
+  const [editItemPrice, setEditItemPrice] = useState('');
 
   useEffect(() => {
     setRooms(getAllRooms());
@@ -100,6 +134,7 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
   const refreshRoomQueue = () => {
     try {
       setRoomQueue(getWaitingTokensByRoomType(roomType));
+      setAllActiveQueue(getTodayActiveQueueItems());
     } catch (e) {
       console.error(e);
     }
@@ -112,10 +147,7 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
   }, [roomType]);
 
   useEffect(() => {
-    if (!currentToken?.token?.id) return;
-    setCustomItemName('');
-    setCustomItemPrice('');
-    setItemQuantity('1');
+    setReferralTargets(new Set());
   }, [currentToken?.token?.id]);
 
   useEffect(() => {
@@ -174,11 +206,117 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
   const visitLocked =
     currentToken?.token?.status === 'completed' || currentToken?.token?.status === 'cancelled';
 
-  const tokenRoomMatchesThisSection = (token: Token): boolean => {
-    const { roomId: opRoomId } = resolveOperatorBillRoom(rooms, user?.room_id, roomType);
-    if (!opRoomId) return false;
-    if (Number(token.room_id) === opRoomId) return true;
-    return hasPendingReferralToRoom(token.id, opRoomId);
+  const canModifyBillItem = (item: any): boolean => {
+    if (!user) return false;
+    if (visitLocked) return false;
+    if (user.role === 'admin') return true;
+    const sameId = Number(item?.operator_id) === Number(user.id);
+    const sameName =
+      String(item?.operator_name ?? '').trim().toLowerCase() ===
+      String(user?.name ?? '').trim().toLowerCase();
+    return sameId || sameName;
+  };
+
+  const cancelEditItem = () => {
+    setEditingItemId(null);
+    setEditItemName('');
+    setEditItemQty('');
+    setEditItemPrice('');
+  };
+
+  const startEditItem = (item: any) => {
+    const itemId = Number(item?.id);
+    if (!Number.isFinite(itemId)) return;
+
+    const unit =
+      item?.unit_price != null
+        ? Number(item.unit_price)
+        : Number(item?.quantity) > 0
+          ? Number(item?.total_price) / Number(item?.quantity)
+          : 0;
+
+    setEditingItemId(itemId);
+    setEditItemName(String(item?.item_name ?? ''));
+    setEditItemQty(String(Number(item?.quantity ?? 1) || 1));
+    setEditItemPrice(String(Number(unit) || 0));
+  };
+
+  const handleSaveItemEdit = (itemId: number) => {
+    if (!currentBill?.bill?.id) return;
+    const item = currentBill?.items?.find((i: any) => Number(i?.id) === Number(itemId));
+    if (!item) {
+      toast.error('Line item not found');
+      return;
+    }
+    if (!canModifyBillItem(item)) {
+      toast.error('You can edit only the lines you created');
+      return;
+    }
+    if (visitLocked) return;
+
+    const name = editItemName.trim();
+    const qty = parseInt(editItemQty, 10);
+    const unitPrice = parseFloat(String(editItemPrice).replace(/,/g, ''));
+
+    if (!name) {
+      toast.error('Item name is required');
+      return;
+    }
+    if (!Number.isFinite(qty) || qty < 1) {
+      toast.error('Quantity must be at least 1');
+      return;
+    }
+    if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+      toast.error('Unit price must be greater than 0');
+      return;
+    }
+
+    try {
+      updateBillItem(itemId, {
+        item_name: name,
+        quantity: qty,
+        unit_price: unitPrice,
+      });
+
+      const refreshed = getBillWithDetails(currentBill.bill.id);
+      if (refreshed) setCurrentBill(refreshed);
+      cancelEditItem();
+      toast.success('Line item updated');
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to update line item');
+    }
+  };
+
+  const handleDeleteItem = (itemId: number) => {
+    if (!currentBill?.bill?.id) return;
+    const item = currentBill?.items?.find((i: any) => Number(i?.id) === Number(itemId));
+    if (!item) {
+      toast.error('Line item not found');
+      return;
+    }
+    if (!canModifyBillItem(item)) {
+      toast.error('You can delete only the lines you created');
+      return;
+    }
+    if (visitLocked) return;
+
+    const ok = window.confirm('Delete this line item?');
+    if (!ok) return;
+
+    try {
+      const removed = removeBillItem(itemId);
+      if (!removed) {
+        toast.error('Failed to delete line item');
+        return;
+      }
+
+      if (editingItemId === itemId) cancelEditItem();
+      const refreshed = getBillWithDetails(currentBill.bill.id);
+      if (refreshed) setCurrentBill(refreshed);
+      toast.success('Line item deleted');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to delete line item');
+    }
   };
 
   const loadVisitForToken = (token: Token, options?: { silent?: boolean }): boolean => {
@@ -194,21 +332,25 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
     }
 
     let working = token;
-    if (hasPendingReferralToRoom(token.id, opRoomId) && Number(token.room_id) !== opRoomId) {
-      activateReferralAtRoom(token.id, opRoomId);
-      const re = getTokenById(token.id);
-      if (!re) {
-        toast.error('Token no longer available');
-        return false;
-      }
-      working = re;
-    }
 
-    if (!tokenRoomMatchesThisSection(working)) {
-      toast.error(
-        `This token is not assigned to ${sectionTitle}. Refer the patient from Doctor Room first.`
-      );
-      return false;
+    if (token.status !== 'completed') {
+      if (hasPendingReferralToRoom(token.id, opRoomId) && Number(token.room_id) !== opRoomId) {
+        activateReferralAtRoom(token.id, opRoomId);
+        const re = getTokenById(token.id);
+        if (!re) {
+          toast.error('Token no longer available');
+          return false;
+        }
+        working = re;
+      } else if (Number(working.room_id) !== opRoomId) {
+        assignTokenToRoom(working.id, opRoomId);
+        const re = getTokenById(working.id);
+        if (!re) {
+          toast.error('Token no longer available');
+          return false;
+        }
+        working = re;
+      }
     }
 
     const tokenDetails = getTokenWithDetails(working.id);
@@ -260,7 +402,7 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
 
     const token = getTokenByNumber(n);
     if (!token) {
-      toast.error(`No token #${n} for today. Check the number or pick from this room's queue.`);
+      toast.error(`No token #${n} for today. Check the number or pick from the list on the right.`);
       refreshRoomQueue();
       return;
     }
@@ -285,7 +427,7 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
     refreshRoomQueue();
   };
 
-  const handleAddCharge = () => {
+  const handleAddBillLine = (itemData: BillItemFormData) => {
     if (!currentToken || !currentBill || !user) return;
     if (visitLocked) {
       toast.error('This visit is completed or cancelled — charges cannot be edited.');
@@ -298,31 +440,31 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
       return;
     }
 
-    if (!customItemName.trim()) {
+    if (!itemData.item_name?.trim()) {
       toast.error('Please enter item name');
       return;
     }
-    const unit = parseFloat(String(customItemPrice).replace(/,/g, ''));
+    const unit = parseFloat(String(itemData.unit_price).replace(/,/g, ''));
     if (!Number.isFinite(unit) || unit <= 0) {
       toast.error('Enter a valid unit price greater than zero');
       return;
     }
-    const qty = parseInt(String(itemQuantity), 10);
+    const qty = parseInt(String(itemData.quantity), 10);
     if (!Number.isFinite(qty) || qty < 1) {
       toast.error('Enter a valid quantity (at least 1)');
       return;
     }
 
-    const itemData: BillItemFormData = {
-      item_name: customItemName.trim(),
-      item_type: defaultItemType,
+    const payload: BillItemFormData = {
+      item_name: itemData.item_name.trim(),
+      item_type: itemData.item_type,
       quantity: qty,
       unit_price: unit,
-      notes: '',
+      notes: itemData.notes ?? '',
     };
 
     try {
-      addBillItem(currentBill.bill.id, itemData, roomId, roomName, user.id, user.name);
+      addBillItem(currentBill.bill.id, payload, roomId, roomName, user.id, user.name);
 
       const updatedBill = getBillWithDetails(currentBill.bill.id);
       setCurrentBill(updatedBill);
@@ -331,10 +473,6 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
       }
 
       toast.success('Charge added successfully');
-
-      setCustomItemName('');
-      setCustomItemPrice('');
-      setItemQuantity('1');
     } catch (error: any) {
       toast.error(error?.message || 'Failed to add charge');
       console.error(error);
@@ -470,6 +608,75 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
     clearCurrentPatient();
   };
 
+  const handleSendOperatorReferrals = () => {
+    if (!currentToken || !user) return;
+    if (visitLocked) {
+      toast.error('Cannot refer a completed or cancelled visit');
+      return;
+    }
+
+    const selected = operatorReferralOptions.filter((r) => referralTargets.has(r.value));
+    if (selected.length === 0) {
+      toast.error('Select at least one destination');
+      return;
+    }
+
+    const roomIds: number[] = [];
+    const missing: string[] = [];
+    for (const r of selected) {
+      const targetRoom = rooms.find((x) => x.type === r.value);
+      if (!targetRoom) missing.push(r.label);
+      else roomIds.push(targetRoom.id);
+    }
+    if (missing.length > 0) {
+      toast.error(`Add these in Admin → Rooms: ${missing.join(', ')}`);
+      return;
+    }
+
+    referPatientToRooms(currentToken.token.id, roomIds);
+    toast.success(
+      selected.length === 1
+        ? `Patient referred to ${selected[0].label}`
+        : `Referred to ${selected.length} places: ${selected.map((s) => s.label).join(', ')}`
+    );
+
+    clearCurrentPatient();
+    refreshRoomQueue();
+  };
+
+  const renderQueueRow = (row: RoomQueueItem) => {
+    const active = currentToken?.token?.id === row.token_id;
+    const tok = getTokenById(row.token_id);
+    const direct = isDirectEntryToken(tok);
+    return (
+      <li key={row.token_id}>
+        <button
+          type="button"
+          onClick={() => openQueueRow(row)}
+          className={`w-full text-left rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+            active ? 'border-primary/45 bg-secondary/60' : 'border-slate-200 bg-white hover:bg-slate-50'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="font-semibold text-slate-900">#{row.token_number}</span>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {direct && (
+                <Badge variant="outline" className="text-[10px] bg-sky-50 text-sky-900 border-sky-200">
+                  Direct
+                </Badge>
+              )}
+              <Badge variant="outline" className={`text-[10px] uppercase shrink-0 ${statusBadgeClass(row.status)}`}>
+                {row.status}
+              </Badge>
+            </div>
+          </div>
+          <p className="text-slate-700 truncate mt-0.5">{row.patient_name}</p>
+          <p className="text-xs text-slate-500 truncate">{row.animal_name}</p>
+        </button>
+      </li>
+    );
+  };
+
   return (
     <div className="flex flex-col xl:flex-row gap-6 items-start">
       <div className="flex-1 min-w-0 space-y-6 w-full">
@@ -501,8 +708,9 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
               </Button>
             </div>
             <p className="text-xs text-slate-500 mt-2">
-              Only tokens currently assigned to {sectionTitle} can be opened here. Use the queue on the right or enter
-              the token number.
+              Enter any today&apos;s token or pick from the queue. Active visits are attached to {sectionTitle} when you
+              open them. Use <strong className="font-medium text-slate-700">All patients</strong> to see everyone today;{' '}
+              <strong className="font-medium text-slate-700">Refer</strong> sends the loaded visit to another department.
             </p>
           </CardContent>
         </Card>
@@ -568,44 +776,14 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Service / item</Label>
-                  <div className="flex gap-2 flex-wrap">
-                    <Input
-                      placeholder="Item name"
-                      value={customItemName}
-                      onChange={(e) => setCustomItemName(e.target.value)}
-                      className="flex-1 min-w-[12rem]"
-                      disabled={visitLocked}
-                    />
-                    <Input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      placeholder="Price"
-                      value={customItemPrice}
-                      onChange={(e) => setCustomItemPrice(e.target.value)}
-                      className="w-28"
-                      disabled={visitLocked}
-                    />
-                    <Input
-                      type="number"
-                      min={1}
-                      placeholder="Qty"
-                      value={itemQuantity}
-                      onChange={(e) => setItemQuantity(e.target.value)}
-                      className="w-20"
-                      disabled={visitLocked}
-                    />
-                    <Button type="button" onClick={() => handleAddCharge()} disabled={visitLocked}>
-                      Add
-                    </Button>
-                  </div>
-                  <p className="text-xs text-slate-500">
-                    Line items are recorded as <span className="font-medium">{defaultItemType.replace('_', ' ')}</span>{' '}
-                    charges for this room.
-                  </p>
-                </div>
+                <QuickChargeSection
+                  presets={getQuickChargePresets(roomType)}
+                  resetKey={currentToken?.token?.id ?? null}
+                  visitLocked={visitLocked}
+                  onAddLine={handleAddBillLine}
+                  customItemType={defaultItemType}
+                  presetHint={`Standard ${sectionTitle.toLowerCase()} fees — set quantity and Add. Custom lines count as ${defaultItemType.replace('_', ' ')} for this room.`}
+                />
 
                 <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3 space-y-2">
                   <Label className="flex items-center gap-2 text-slate-800">
@@ -665,13 +843,114 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
                           </tr>
                         </thead>
                         <tbody>
-                          {currentBill.items.map((item: any) => (
-                            <tr key={item.id} className="border-b border-slate-100">
-                              <td className="py-2 text-sm">{item.item_name}</td>
-                              <td className="py-2 text-sm text-right">{item.quantity}</td>
-                              <td className="py-2 text-sm text-right">Rs. {item.total_price}</td>
-                            </tr>
-                          ))}
+                          {currentBill.items.map((item: any) => {
+                            const itemId = Number(item?.id);
+                            const isEditing = editingItemId === itemId;
+                            const canEdit = canModifyBillItem(item);
+
+                            const qtyNum = isEditing ? parseInt(editItemQty, 10) : Number(item?.quantity);
+                            const unitNum = isEditing
+                              ? parseFloat(String(editItemPrice).replace(/,/g, ''))
+                              : Number(item?.unit_price);
+                            const totalNum = Number.isFinite(qtyNum) && Number.isFinite(unitNum) ? qtyNum * unitNum : 0;
+
+                            return (
+                              <tr key={item.id} className="border-b border-slate-100">
+                                <td className="py-2 text-sm">
+                                  {isEditing ? (
+                                    <Input
+                                      value={editItemName}
+                                      onChange={(e) => setEditItemName(e.target.value)}
+                                      disabled={visitLocked}
+                                      className="h-8 w-56"
+                                    />
+                                  ) : (
+                                    item.item_name
+                                  )}
+                                </td>
+                                <td className="py-2 text-sm text-right">
+                                  {isEditing ? (
+                                    <Input
+                                      type="number"
+                                      min={1}
+                                      value={editItemQty}
+                                      onChange={(e) => setEditItemQty(e.target.value)}
+                                      disabled={visitLocked}
+                                      className="h-8 w-20 ml-auto"
+                                    />
+                                  ) : (
+                                    item.quantity
+                                  )}
+                                </td>
+                                <td className="py-2 text-sm text-right">
+                                  {isEditing ? (
+                                    <div className="flex flex-col items-end gap-1">
+                                      <Input
+                                        type="number"
+                                        min={0}
+                                        step={0.01}
+                                        value={editItemPrice}
+                                        onChange={(e) => setEditItemPrice(e.target.value)}
+                                        disabled={visitLocked}
+                                        className="h-8 w-28"
+                                      />
+                                      <div className="text-xs text-slate-600">
+                                        Total: Rs. {Number(totalNum).toLocaleString('en-IN')}
+                                      </div>
+                                      <div className="flex items-center gap-1 pt-1">
+                                        <Button
+                                          type="button"
+                                          size="icon"
+                                          variant="outline"
+                                          className="h-8 w-8"
+                                          onClick={() => handleSaveItemEdit(itemId)}
+                                          disabled={visitLocked}
+                                        >
+                                          <Save className="w-4 h-4" />
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          size="icon"
+                                          variant="ghost"
+                                          className="h-8 w-8"
+                                          onClick={cancelEditItem}
+                                          disabled={visitLocked}
+                                        >
+                                          <X className="w-4 h-4" />
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="flex justify-end items-center gap-2">
+                                      <span>Rs. {Number(item.total_price).toLocaleString('en-IN')}</span>
+                                      {canEdit && (
+                                        <>
+                                          <Button
+                                            type="button"
+                                            size="icon"
+                                            variant="outline"
+                                            className="h-8 w-8"
+                                            onClick={() => startEditItem(item)}
+                                          >
+                                            <Pencil className="w-4 h-4" />
+                                          </Button>
+                                          <Button
+                                            type="button"
+                                            size="icon"
+                                            variant="ghost"
+                                            className="h-8 w-8 text-red-600 hover:text-red-700"
+                                            onClick={() => handleDeleteItem(itemId)}
+                                          >
+                                            <Trash2 className="w-4 h-4" />
+                                          </Button>
+                                        </>
+                                      )}
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                         <tfoot>
                           {Number(currentBill.bill.discount_amount) > 0 && (
@@ -796,52 +1075,124 @@ export function RoomOperatorModule({ roomType }: RoomOperatorModuleProps) {
         )}
       </div>
 
-      <aside className="w-full xl:w-80 shrink-0">
+      <aside className="w-full xl:w-96 shrink-0">
         <Card className="xl:sticky xl:top-4">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <ListOrdered className="w-5 h-5" />
-              {sectionTitle} queue
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 gap-2">
+            <CardTitle className="text-base font-semibold flex items-center gap-2 min-w-0">
+              <ListOrdered className="w-5 h-5 shrink-0" />
+              <span className="truncate">Room queue</span>
             </CardTitle>
             <Button type="button" variant="ghost" size="icon" onClick={refreshRoomQueue} aria-label="Refresh queue">
               <RefreshCw className="w-4 h-4" />
             </Button>
           </CardHeader>
           <CardContent className="pt-0">
-            {roomQueue.length === 0 ? (
-              <p className="text-sm text-slate-500 py-6 text-center">No patients waiting in this room today.</p>
-            ) : (
-              <ul className="max-h-[min(70vh,32rem)] overflow-y-auto space-y-1 pr-1 -mr-1">
-                {roomQueue.map((row) => {
-                  const active = currentToken?.token?.id === row.token_id;
-                  return (
-                    <li key={row.token_id}>
-                      <button
+            <Tabs
+              value={sidebarTab}
+              onValueChange={(v) => setSidebarTab(v as 'queue' | 'all' | 'refer')}
+              className="w-full"
+            >
+              <TabsList className="grid w-full grid-cols-3 h-auto p-1 gap-1">
+                <TabsTrigger value="queue" className="text-xs px-1.5 py-2">
+                  This room
+                </TabsTrigger>
+                <TabsTrigger value="all" className="text-xs px-1.5 py-2">
+                  All patients
+                </TabsTrigger>
+                <TabsTrigger value="refer" className="text-xs px-1.5 py-2">
+                  Refer
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="queue" className="mt-3 space-y-0">
+                <p className="text-xs text-slate-500 mb-2">
+                  Waiting for {sectionTitle} (direct visits, referrals, or assigned here).
+                </p>
+                {roomQueue.length === 0 ? (
+                  <p className="text-sm text-slate-500 py-6 text-center">No one in this room&apos;s queue today.</p>
+                ) : (
+                  <ul className="max-h-[min(70vh,32rem)] overflow-y-auto space-y-1 pr-1 -mr-1">
+                    {roomQueue.map((row) => renderQueueRow(row))}
+                  </ul>
+                )}
+              </TabsContent>
+
+              <TabsContent value="all" className="mt-3 space-y-0">
+                <p className="text-xs text-slate-500 mb-2">
+                  Everyone still active today (waiting or in progress). Tap to open — the visit is attached to{' '}
+                  {sectionTitle} for billing and notes.
+                </p>
+                {allActiveQueue.length === 0 ? (
+                  <p className="text-sm text-slate-500 py-6 text-center">No active visits today.</p>
+                ) : (
+                  <ul className="max-h-[min(70vh,32rem)] overflow-y-auto space-y-1 pr-1 -mr-1">
+                    {allActiveQueue.map((row) => renderQueueRow(row))}
+                  </ul>
+                )}
+              </TabsContent>
+
+              <TabsContent value="refer" className="mt-3 space-y-3">
+                <p className="text-xs text-slate-600">
+                  Send the <strong className="font-medium text-slate-800">loaded visit</strong> to other departments. No
+                  doctor referral is required — same as reception direct routing.
+                </p>
+                {!currentToken ? (
+                  <p className="text-sm text-slate-500 py-4 text-center rounded-lg border border-dashed border-slate-200">
+                    Load a patient from the queue or enter a token number first.
+                  </p>
+                ) : visitLocked ? (
+                  <p className="text-sm text-amber-800 py-2">This visit is read-only — cannot refer.</p>
+                ) : (
+                  <>
+                    <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-2 mb-2 text-xs text-slate-700">
+                      Token #{currentToken.token.token_number} · {currentToken.patient?.owner_name}
+                    </div>
+                    <div className="flex flex-col gap-2 max-h-[min(50vh,22rem)] overflow-y-auto pr-1">
+                      {operatorReferralOptions.map((room) => (
+                        <label
+                          key={room.value}
+                          className={`flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
+                            referralTargets.has(room.value)
+                              ? 'border-primary/45 bg-secondary/60'
+                              : 'border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          <Checkbox
+                            checked={referralTargets.has(room.value)}
+                            onCheckedChange={() => {
+                              setReferralTargets((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(room.value)) next.delete(room.value);
+                                else next.add(room.value);
+                                return next;
+                              });
+                            }}
+                          />
+                          <span className="font-medium text-slate-900 text-sm">{room.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
                         type="button"
-                        onClick={() => openQueueRow(row)}
-                        className={`w-full text-left rounded-lg border px-3 py-2.5 text-sm transition-colors ${
-                          active
-                            ? 'border-primary/45 bg-secondary/60'
-                            : 'border-slate-200 bg-white hover:bg-slate-50'
-                        }`}
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setReferralTargets(new Set(operatorReferralOptions.map((r) => r.value)))}
                       >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-semibold text-slate-900">#{row.token_number}</span>
-                          <Badge
-                            variant="outline"
-                            className={`text-[10px] uppercase shrink-0 ${statusBadgeClass(row.status)}`}
-                          >
-                            {row.status}
-                          </Badge>
-                        </div>
-                        <p className="text-slate-700 truncate mt-0.5">{row.patient_name}</p>
-                        <p className="text-xs text-slate-500 truncate">{row.animal_name}</p>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+                        Select all
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => setReferralTargets(new Set())}>
+                        Clear
+                      </Button>
+                    </div>
+                    <Button type="button" className="w-full" onClick={handleSendOperatorReferrals}>
+                      <ArrowRight className="w-4 h-4 mr-2" />
+                      Send to selected
+                    </Button>
+                  </>
+                )}
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
       </aside>

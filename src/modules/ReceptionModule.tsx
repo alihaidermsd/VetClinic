@@ -18,12 +18,18 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { Ticket, Printer, Search, RefreshCw, User, Phone, PawPrint } from 'lucide-react';
+import { Ticket, Printer, Search, RefreshCw, User, Phone, PawPrint, XCircle } from 'lucide-react';
 import { createWalkInPatient, searchPatients } from '@/lib/services/patientService';
-import { createToken, getTodayTokensForReception, type ReceptionTokenRow } from '@/lib/services/tokenService';
+import {
+  createToken,
+  cancelToken,
+  getTodayTokensForReception,
+  type ReceptionTokenRow,
+} from '@/lib/services/tokenService';
 import { getBillById } from '@/lib/services/billingService';
+import { getRoomsByType } from '@/lib/services/roomService';
 import { printTokenSlip } from '@/lib/printToken';
-import type { Animal, AnimalType } from '@/types';
+import type { Animal, AnimalType, RoomType } from '@/types';
 import { toast } from 'sonner';
 
 const RECEPTION_SPECIES_OPTIONS: { value: AnimalType; label: string }[] = [
@@ -33,6 +39,15 @@ const RECEPTION_SPECIES_OPTIONS: { value: AnimalType; label: string }[] = [
   { value: 'bird', label: 'Bird' },
   { value: 'tiger', label: 'Tiger' },
   { value: 'other', label: 'Other — type below' },
+];
+
+type DirectDept = Extract<RoomType, 'lab' | 'xray' | 'surgery' | 'pharmacy'>;
+
+const DIRECT_DEPT_OPTIONS: { value: DirectDept; label: string }[] = [
+  { value: 'lab', label: 'Laboratory' },
+  { value: 'xray', label: 'X-Ray' },
+  { value: 'surgery', label: 'Surgery' },
+  { value: 'pharmacy', label: 'Pharmacy' },
 ];
 
 function formatPetLineForToken(pet: string, type: AnimalType, customSpecies: string): string {
@@ -45,6 +60,7 @@ function formatPetLineForToken(pet: string, type: AnimalType, customSpecies: str
 }
 
 export function ReceptionModule() {
+  const [tokenNumberInput, setTokenNumberInput] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [petName, setPetName] = useState('');
   const [petAnimalType, setPetAnimalType] = useState<AnimalType>('dog');
@@ -52,6 +68,8 @@ export function ReceptionModule() {
   const [phone, setPhone] = useState('');
 
   const [queue, setQueue] = useState<ReceptionTokenRow[]>([]);
+  const [visitFlow, setVisitFlow] = useState<'doctor_first' | 'direct'>('doctor_first');
+  const [directDept, setDirectDept] = useState<DirectDept>('lab');
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -66,13 +84,50 @@ export function ReceptionModule() {
     setQueue(getTodayTokensForReception());
   };
 
+  const resolveDirectRoomId = (): { roomId: number; label: string } | null => {
+    const rooms = getRoomsByType(directDept);
+    const id = rooms[0]?.id;
+    if (!id) return null;
+    const label = DIRECT_DEPT_OPTIONS.find((o) => o.value === directDept)?.label ?? directDept;
+    return { roomId: Number(id), label };
+  };
+
   const issueTokenAndPrint = (
     patientId: number,
     animalId: number,
     displayCustomer: string,
     displayPet: string
   ) => {
-    const token = createToken(patientId, animalId);
+    const hasManualToken = tokenNumberInput.trim().length > 0;
+    const requestedToken = Number(tokenNumberInput);
+    if (hasManualToken && (!Number.isFinite(requestedToken) || requestedToken < 1 || !Number.isInteger(requestedToken))) {
+      toast.error('Enter a valid token number');
+      return;
+    }
+
+    let token;
+    let visitNote: string | undefined;
+
+    if (visitFlow === 'direct') {
+      const resolved = resolveDirectRoomId();
+      if (!resolved) {
+        toast.error(
+          `No ${DIRECT_DEPT_OPTIONS.find((o) => o.value === directDept)?.label ?? 'department'} is set up. Add it under Admin → Rooms.`
+        );
+        return;
+      }
+      token = createToken(patientId, animalId, {
+        tokenNumber: hasManualToken ? requestedToken : undefined,
+        entryKind: 'direct',
+        directRoomId: resolved.roomId,
+      });
+      visitNote = `Direct visit — ${resolved.label}`;
+    } else {
+      token = createToken(patientId, animalId, {
+        tokenNumber: hasManualToken ? requestedToken : undefined,
+      });
+    }
+
     const bill = getBillById(token.bill_id);
     const billCode = bill?.bill_code ?? '—';
 
@@ -81,6 +136,7 @@ export function ReceptionModule() {
       customerName: displayCustomer,
       petName: displayPet,
       billCode,
+      visitNote,
     });
 
     if (!printed) {
@@ -117,9 +173,10 @@ export function ReceptionModule() {
       setPetAnimalType('dog');
       setCustomSpecies('');
       setPhone('');
+      setTokenNumberInput('');
     } catch (e) {
       console.error(e);
-      toast.error('Could not create token. Try again.');
+      toast.error(e instanceof Error ? e.message : 'Could not create token. Try again.');
     }
   };
 
@@ -142,6 +199,24 @@ export function ReceptionModule() {
     else toast.error('Pop-up blocked — allow pop-ups to print.');
   };
 
+  const handleCancelToken = (row: ReceptionTokenRow) => {
+    if (row.status === 'completed' || row.status === 'cancelled') {
+      toast.message(`Token #${row.token_number} cannot be cancelled`);
+      return;
+    }
+    const ok = window.confirm(
+      `Cancel token #${row.token_number} for ${row.patient_name}?`
+    );
+    if (!ok) return;
+    const updated = cancelToken(Number(row.id));
+    if (!updated) {
+      toast.error('Failed to cancel token');
+      return;
+    }
+    refreshQueue();
+    toast.success(`Token #${row.token_number} cancelled`);
+  };
+
   const getStatusBadge = (status: string) => {
     const styles: Record<string, string> = {
       waiting: 'bg-yellow-100 text-yellow-800',
@@ -162,11 +237,80 @@ export function ReceptionModule() {
             New queue token
           </CardTitle>
           <p className="text-sm text-slate-500 font-normal">
-            Enter the customer and pet name, pick the animal type (or enter a custom species), then create the token.
-            Phone is optional.
+            Choose whether the patient sees the doctor first or goes straight to lab, X-ray, surgery, or pharmacy. Then
+            enter details and create the token. Phone is optional.
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="tokenNo" className="flex items-center gap-2">
+              <Ticket className="w-4 h-4" />
+              Token number (manual)
+            </Label>
+            <Input
+              id="tokenNo"
+              type="number"
+              min={1}
+              value={tokenNumberInput}
+              onChange={(e) => setTokenNumberInput(e.target.value)}
+              placeholder="Enter token number provided by receptionist"
+              className="text-lg"
+              onKeyDown={(e) => e.key === 'Enter' && handleQuickCreate()}
+            />
+            <p className="text-xs text-slate-500">
+              Optional. Leave empty to auto-generate next token number. If entered and already active today, it will be rejected.
+            </p>
+          </div>
+
+          <div className="space-y-3 rounded-xl border border-primary/20 bg-primary/5 p-4">
+            <Label className="text-slate-800">Visit type</Label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setVisitFlow('doctor_first')}
+                className={`rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
+                  visitFlow === 'doctor_first'
+                    ? 'border-primary bg-secondary/70 ring-1 ring-primary/30'
+                    : 'border-slate-200 bg-white hover:bg-slate-50'
+                }`}
+              >
+                <span className="font-semibold text-slate-900">Doctor first</span>
+                <p className="text-xs text-slate-600 mt-0.5">Usual flow — token for the doctor; referrals added later.</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setVisitFlow('direct')}
+                className={`rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
+                  visitFlow === 'direct'
+                    ? 'border-primary bg-secondary/70 ring-1 ring-primary/30'
+                    : 'border-slate-200 bg-white hover:bg-slate-50'
+                }`}
+              >
+                <span className="font-semibold text-slate-900">Direct to department</span>
+                <p className="text-xs text-slate-600 mt-0.5">Walk-in only for lab, X-ray, surgery, or pharmacy — no doctor queue.</p>
+              </button>
+            </div>
+            {visitFlow === 'direct' && (
+              <div className="space-y-1.5 pt-1">
+                <Label htmlFor="direct-dept" className="text-sm text-slate-700">
+                  Department
+                </Label>
+                <Select value={directDept} onValueChange={(v) => setDirectDept(v as DirectDept)}>
+                  <SelectTrigger id="direct-dept" className="bg-white">
+                    <SelectValue placeholder="Select department" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DIRECT_DEPT_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="cust" className="flex items-center gap-2">
               <User className="w-4 h-4" />
@@ -337,15 +481,41 @@ export function ReceptionModule() {
             <ul className="max-h-[min(70vh,32rem)] overflow-y-auto space-y-1 pr-1 -mr-1">
               {queue.map((row) => (
                 <li key={row.id}>
-                  <button
-                    type="button"
-                    className="w-full text-left rounded-lg border border-slate-200 bg-white hover:bg-slate-50 px-3 py-2.5 transition-colors"
-                    onClick={() => handleReprint(row)}
-                    aria-label={`Reprint token #${row.token_number}`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
+                  <div className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
                       <span className="font-semibold text-slate-900">#{row.token_number}</span>
-                      <Badge className={getStatusBadge(row.status)}>{row.status}</Badge>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {row.entry_kind === 'direct' && (
+                          <Badge variant="outline" className="text-[10px] bg-sky-50 text-sky-900 border-sky-200">
+                            Direct
+                          </Badge>
+                        )}
+                        <Badge className={getStatusBadge(row.status)}>{row.status}</Badge>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-slate-600 hover:text-slate-900"
+                          onClick={() => handleReprint(row)}
+                          aria-label={`Reprint token #${row.token_number}`}
+                        >
+                          <Printer className="w-3.5 h-3.5 mr-1" />
+                          Print
+                        </Button>
+                        {row.status !== 'completed' && row.status !== 'cancelled' && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-red-600 hover:text-red-700"
+                            onClick={() => handleCancelToken(row)}
+                            aria-label={`Cancel token #${row.token_number}`}
+                          >
+                            <XCircle className="w-3.5 h-3.5 mr-1" />
+                            Cancel
+                          </Button>
+                        )}
+                      </div>
                     </div>
                     <p className="text-sm text-slate-700 truncate mt-0.5">
                       {row.patient_name}
@@ -357,7 +527,7 @@ export function ReceptionModule() {
                         <Printer className="w-4 h-4 text-slate-500" />
                       </div>
                     </div>
-                  </button>
+                  </div>
                 </li>
               ))}
             </ul>

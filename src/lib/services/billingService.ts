@@ -531,3 +531,29 @@ export function getCommonServices(): { name: string; type: ItemType; price: numb
     { name: 'Nail Trimming', type: 'procedure', price: 100 },
   ];
 }
+
+/** Standard fees for quick “quantity + Add” in doctor / lab / X-ray / surgery screens. */
+export type QuickChargePreset = { name: string; item_type: ItemType; unit_price: number };
+
+export function getQuickChargePresets(
+  context: 'doctor' | 'lab' | 'xray' | 'surgery'
+): QuickChargePreset[] {
+  if (context === 'doctor') {
+    // Simple, editable standard fee on the doctor screen.
+    return [
+      {
+        name: 'Doctor Fee',
+        item_type: 'consultation',
+        unit_price: 1000,
+      },
+    ];
+  }
+
+  return getCommonServices()
+    .filter((s) => {
+      if (context === 'lab') return s.type === 'lab_test';
+      if (context === 'xray') return s.type === 'xray';
+      return s.type === 'surgery';
+    })
+    .map((s) => ({ name: s.name, item_type: s.type, unit_price: s.price }));
+}
